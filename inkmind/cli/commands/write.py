@@ -65,7 +65,8 @@ class WriteCommand(BaseCommand):
                 # 通过 T1 事务边界保存章节（自动推进状态至 DRAFT_READY）
                 await uow.t1_writer_complete_chapter(chapter)
 
-                # 更新 pipeline 状态
+                # 更新 pipeline 状态：新建分支只构造对象，序号回写无条件执行
+                # （与 CollaborationPipeline 一致，见 #11）
                 if not pipeline:
                     pipeline = PipelineState(
                         novel_id=novel_id,
@@ -75,9 +76,8 @@ class WriteCommand(BaseCommand):
                         iteration=0,
                         max_iterations=3,
                     )
-                else:
-                    pipeline.current_chapter_index = next_index
-                    pipeline.total_chapters = max(pipeline.total_chapters, next_index)
+                pipeline.current_chapter_index = next_index
+                pipeline.total_chapters = max(pipeline.total_chapters, next_index)
 
                 await uow.pipelines.save(pipeline)
                 await uow.commit()

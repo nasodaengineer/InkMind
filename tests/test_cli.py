@@ -319,6 +319,39 @@ class TestWrite:
         data = json.loads(result.stdout)
         assert "chapter_id" in data
 
+    def test_write_sequential_chapter_index(self, temp_db_dir):
+        """同一 novel 连续 write，章节序号依次为 1、2、3（#11 回归）。"""
+        import sqlite3
+
+        db = os.path.join(temp_db_dir, "write_sequential.db")
+        init_result = _cli("init", "--title", "连续写作", f"--db={db}")
+        novel_id = _extract_novel_id(init_result.stdout)
+        if not novel_id:
+            pytest.skip("未提取到 novel_id")
+
+        indexes = []
+        for i, title in enumerate(["第一章", "第二章", "第三章"]):
+            result = _cli("write", title, f"--novel-id={novel_id}", f"--db={db}", "--json")
+            assert result.returncode == 0
+            indexes.append(json.loads(result.stdout)["chapter_index"])
+
+            if i == 0:
+                # 首次 write 后 PipelineState 应已回写序号
+                conn = sqlite3.connect(db)
+                try:
+                    row = conn.execute(
+                        "SELECT current_chapter_index, total_chapters "
+                        "FROM pipeline_states WHERE novel_id = ?",
+                        (novel_id,),
+                    ).fetchone()
+                finally:
+                    conn.close()
+                assert row is not None
+                assert row[0] == 1, "首次 write 后 current_chapter_index 应为 1"
+                assert row[1] == 1, "首次 write 后 total_chapters 应为 1"
+
+        assert indexes == [1, 2, 3]
+
 
 def _extract_novel_id(output: str) -> str:
     """从 CLI 输出提取 novel_id。"""
