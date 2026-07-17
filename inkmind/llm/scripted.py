@@ -18,9 +18,10 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
-from inkmind.llm.providers.base import LLMResponse
+from inkmind.llm.providers.base import LLMResponse, ProviderStats, aggregate_snapshots
 
 
 class ScriptedLLMClient:
@@ -37,6 +38,7 @@ class ScriptedLLMClient:
         }
         self.calls: List[Dict[str, Optional[str]]] = []
         self._call_counts: Dict[str, int] = {}
+        self._stats_history: List[ProviderStats] = []
 
     async def chat(
         self,
@@ -55,6 +57,23 @@ class ScriptedLLMClient:
         )
         self._call_counts[agent_role] = self._call_counts.get(agent_role, 0) + 1
         content = self._next_content(agent_role, prompt)
+        # ADR-0010 §10-A：离线调用同样产生 Stats 快照（零成本、零延迟）
+        self.record_stats(
+            ProviderStats(
+                provider_name="scripted",
+                model_name="scripted-fake",
+                latency_ms=0.0,
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+                estimated_cost=0.0,
+                success=True,
+                error_type=None,
+                degraded=False,
+                retry_count=0,
+                timestamp=datetime.now(timezone.utc),
+            )
+        )
         return LLMResponse(
             content=content,
             model="scripted-fake",
@@ -66,6 +85,20 @@ class ScriptedLLMClient:
     def get_stats(self) -> dict:
         """离线客户端无 Provider 统计，返回空 dict（接口对齐）。"""
         return {}
+
+    # ── Stats 聚合（ADR-0010 §10-C，接口与 LLMClient 对齐） ──
+
+    def record_stats(self, stats: ProviderStats) -> None:
+        """记录一份调用快照。"""
+        self._stats_history.append(stats)
+
+    def aggregate_stats(self) -> dict:
+        """返回当前会话的汇总统计。"""
+        return aggregate_snapshots(self._stats_history)
+
+    def reset_stats(self) -> None:
+        """清空会话 Stats 历史。"""
+        self._stats_history.clear()
 
     # ── 内部 ──────────────────────────────────────────────
 

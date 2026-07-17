@@ -13,7 +13,12 @@ import os
 from typing import AsyncGenerator, Optional
 
 from inkmind.llm.factory import ModelRouter, ProviderFactory
-from inkmind.llm.providers.base import LLMResponse, cleanup_http_clients
+from inkmind.llm.providers.base import (
+    LLMResponse,
+    ProviderStats,
+    aggregate_snapshots,
+    cleanup_http_clients,
+)
 from inkmind.models.llm import LLMConfig
 
 
@@ -31,6 +36,10 @@ class LLMClient:
         self.config = config or LLMConfig()
         self.factory = ProviderFactory(self.config)
         self.router = ModelRouter(self.factory, self.config)
+        # ADR-0010 §10-C：会话级 Stats 历史，Provider 埋点经 sink 自动汇入
+        self._stats_history: list[ProviderStats] = []
+        for provider in self.factory.list_providers().values():
+            provider._stats_sink = self.record_stats
 
     # ── 公共接口 ──────────────────────────────────────────
 
@@ -82,10 +91,26 @@ class LLMClient:
         return self.factory.get_provider(name)
 
     def get_stats(self):
-        """获取所有 Provider 的运行时统计。"""
+        """获取所有 Provider 的运行时统计（可变累计器视图）。"""
         return {
             name: p.stats for name, p in self.factory.list_providers().items()
         }
+
+    # ── Stats 聚合（ADR-0010 §10-C） ──────────────────────
+
+    def record_stats(self, stats: ProviderStats) -> None:
+        """记录一份调用快照（Provider 埋点自动调用，亦可手动追加）。"""
+        self._stats_history.append(stats)
+
+    def aggregate_stats(self) -> dict:
+        """返回当前会话的汇总统计（total_calls/tokens/cost/延迟/成功率/降级率）。"""
+        return aggregate_snapshots(self._stats_history)
+
+    def reset_stats(self) -> None:
+        """清空会话 Stats 历史（含各 Provider 的调用快照历史）。"""
+        self._stats_history.clear()
+        for provider in self.factory.list_providers().values():
+            provider.stats_history.clear()
 
     # ── 生命周期 ──────────────────────────────────────────
 

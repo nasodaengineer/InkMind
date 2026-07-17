@@ -146,10 +146,13 @@ class ModelRouter:
         candidates = self._candidate_models(agent_role)
         errors: List[Tuple[str, str, str]] = []  # (model, provider_name, error_msg)
 
-        for model in candidates:
+        for idx, model in enumerate(candidates):
             provider = self.get_provider_for_model(model)
             try:
-                return await provider.chat(prompt, model=model, system_prompt=system_prompt, **kwargs)
+                return await provider.chat(
+                    prompt, model=model, system_prompt=system_prompt,
+                    degraded=idx > 0, **kwargs,
+                )
             except Exception as e:
                 provider.stats.fallback_used += 1
                 errors.append((model, provider.config.name, str(e) or type(e).__name__))
@@ -169,10 +172,13 @@ class ModelRouter:
         errors: List[Tuple[str, str, str]] = []
         last_error: Optional[Exception] = None
 
-        for model in candidates:
+        for idx, model in enumerate(candidates):
             provider = self.get_provider_for_model(model)
             try:
-                async for chunk in provider.chat_stream(prompt, model=model, system_prompt=system_prompt, **kwargs):
+                async for chunk in provider.chat_stream(
+                    prompt, model=model, system_prompt=system_prompt,
+                    degraded=idx > 0, **kwargs,
+                ):
                     yield chunk
                 return
             except Exception as e:

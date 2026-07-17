@@ -13,7 +13,6 @@
 
 from __future__ import annotations
 
-import os
 from contextlib import asynccontextmanager
 from typing import AsyncIterator, Callable, Optional
 from uuid import UUID
@@ -45,46 +44,58 @@ class UnitOfWork:
     每个方法对应一个事务边界。所有操作在同一个 AsyncSession 上执行，
     由调用方负责 commit / rollback。
 
-    并发安全：当通过 db_path 字符串构造时，自动启用文件级写锁。
+    并发安全：session 模式传入 db_path 或以 db_path 字符串构造时，
+    均启用文件级写锁（ADR-0011 §11-C，commit 在锁保护下序列化）；
+    两种构造的锁文件统一为 {db_path}.lock（§11-B），互斥才成立。
     """
 
     def __init__(
         self,
         session_or_db_path: AsyncSession | str | None = None,
         timeout: float = 5.0,
+        db_path: str | None = None,
     ):
         if isinstance(session_or_db_path, str):
-            # 字符串路径 → 文件锁模式（用于测试或 CLI 简易调用）
-            self._session = None
-            lock_dir = os.path.dirname(session_or_db_path)
-            self._lock = FileLock(lock_dir, "db", timeout=timeout)
-            self.novels = None  # type: ignore[assignment]
-            self.chapters = None
-            self.characters = None
-            self.worlds = None
-            self.pipelines = None
-            self.idempotency = None
-        else:
-            self._session = session_or_db_path
-            self._lock = None
-            self.novels = NovelRepository(self._session) if self._session else None
-            self.chapters = ChapterRepository(self._session) if self._session else None
-            self.characters = CharacterRepository(self._session) if self._session else None
-            self.worlds = WorldRepository(self._session) if self._session else None
-            self.pipelines = PipelineStateRepository(self._session) if self._session else None
-            self.idempotency = IdempotencyGuard(self._session) if self._session else None
+            # 字符串路径 → 文件锁模式（用于测试或 CLI 简易调用，无 session/repos）
+            db_path = session_or_db_path
+            session_or_db_path = None
+
+        self._session = session_or_db_path
+        self._lock = (
+            FileLock.from_path(db_path, timeout=timeout) if db_path else None
+        )
+        self.novels = NovelRepository(self._session) if self._session else None
+        self.chapters = ChapterRepository(self._session) if self._session else None
+        self.characters = CharacterRepository(self._session) if self._session else None
+        self.worlds = WorldRepository(self._session) if self._session else None
+        self.pipelines = PipelineStateRepository(self._session) if self._session else None
+        self.idempotency = IdempotencyGuard(self._session) if self._session else None
+        self._lock_held = False
+
+    @property
+    def session(self) -> AsyncSession:
+        """只读访问内部 session（ADR-0009：外部不得持有私有 ``_session``）。
+
+        仅供只读查询与仓库未覆盖的旧接口（如 JSONSnapshot）使用；
+        写操作一律经 T1-T5 事务边界方法 + commit()。
+        """
+        if self._session is None:
+            raise RuntimeError("UnitOfWork 未绑定 session（字符串锁模式不支持）")
+        return self._session
 
     def __enter__(self) -> UnitOfWork:
         """获取文件级写锁（同步上下文管理器入口）。"""
         if self._lock:
             if not self._lock.acquire():
                 raise RuntimeError("数据库写锁超时，请稍后重试")
+            self._lock_held = True
         return self
 
     def __exit__(self, *args) -> None:
         """释放文件级写锁。"""
-        if self._lock:
+        if self._lock and self._lock_held:
             self._lock.release()
+            self._lock_held = False
 
     # ═══════════════════════════════════════════════════
     #  T1: Writer 完成章节
@@ -323,8 +334,21 @@ class UnitOfWork:
         await self._session.flush()
 
     async def commit(self) -> None:
-        """提交当前事务（ADR-0009：外部不直接触碰 session）。"""
-        await self._session.commit()
+        """提交当前事务（ADR-0009：外部不直接触碰 session）。
+
+        ADR-0011 §11-C：持有文件锁配置时，提交在锁保护下序列化；
+        锁已被 ``with uow`` 持有（_lock_held）时不重复获取，避免自锁死。
+        """
+        if self._lock is None or self._lock_held:
+            await self._session.commit()
+            return
+        acquired = await self._lock.aacquire()
+        if not acquired:
+            raise RuntimeError("数据库写锁超时，请稍后重试")
+        try:
+            await self._session.commit()
+        finally:
+            self._lock.release()
 
     @asynccontextmanager
     async def transaction(self) -> AsyncIterator[None]:

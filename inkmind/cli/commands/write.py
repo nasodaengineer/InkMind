@@ -80,7 +80,7 @@ class WriteCommand(BaseCommand):
                     pipeline.total_chapters = max(pipeline.total_chapters, next_index)
 
                 await uow.pipelines.save(pipeline)
-                await uow._session.commit()
+                await uow.commit()
 
         formatter.success(
             f"章节「{args.title}」（第 {next_index} 章）已创建，状态: 写作中",

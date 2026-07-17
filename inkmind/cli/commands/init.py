@@ -3,14 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
-from uuid import UUID
 
 from inkmind.cli.base_command import BaseCommand
-from inkmind.cli.db import get_session
+from inkmind.cli.db import get_uow
 from inkmind.cli.formatter import OutputFormatter
 from inkmind.models.novel import Novel, NovelMetadata
-from inkmind.storage.models import NovelModel
 
 COMMAND = "init"
 HELP = "初始化新小说（交互式填写元数据）"
@@ -58,24 +55,13 @@ class InitCommand(BaseCommand):
 
     @classmethod
     async def _do_init(cls, db_path, title, description, formatter):
-        async with get_session(db_path) as session:
+        async with get_uow(db_path) as uow:
             novel = Novel(
                 title=title,
                 metadata=NovelMetadata(description=description),
             )
-
-            model = NovelModel(
-                uuid=str(novel.id),
-                title=novel.title,
-                description=novel.metadata.description,
-                status=novel.metadata.status,
-                word_count=novel.metadata.word_count,
-                chapter_count=novel.metadata.chapter_count,
-                created_at=novel.created_at,
-                updated_at=novel.updated_at,
-            )
-            session.add(model)
-            await session.commit()
+            await uow.novels.save(novel)
+            await uow.commit()
 
         formatter.success(
             f"小说「{title}」已创建",

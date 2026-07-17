@@ -7,14 +7,14 @@ from __future__ import annotations
 
 import pytest
 
-from inkmind.llm.providers.base import ProviderStats
+from inkmind.llm.providers.base import ProviderStatsAccumulator
 
 
 class TestProviderFailover:
     def test_stats_tracking_on_failover_chain(self):
         """降级链中 stats 应累加正确。"""
-        # 验证 ProviderStats 含有所有必需字段
-        stats = ProviderStats()
+        # 验证 ProviderStatsAccumulator 含有所有必需字段
+        stats = ProviderStatsAccumulator()
         assert hasattr(stats, "total_calls")
         assert hasattr(stats, "successful_calls")
         assert hasattr(stats, "failed_calls")

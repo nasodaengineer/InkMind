@@ -30,7 +30,7 @@ from inkmind.llm.providers.anthropic_provider import (
 )
 from inkmind.llm.providers.base import (
     LLMResponse,
-    ProviderStats,
+    ProviderStatsAccumulator,
     _http_client_pool,
     _provider_key,
     extract_api_key_from_env,
@@ -375,16 +375,16 @@ class TestLLMResponse:
         assert resp.usage is None
 
 
-class TestProviderStats:
+class TestProviderStatsAccumulator:
     def test_defaults(self):
-        stats = ProviderStats()
+        stats = ProviderStatsAccumulator()
         assert stats.total_calls == 0
         assert stats.successful_calls == 0
         assert stats.failed_calls == 0
         assert stats.fallback_used == 0
 
     def test_increment(self):
-        stats = ProviderStats()
+        stats = ProviderStatsAccumulator()
         stats.total_calls += 1
         stats.successful_calls += 1
         stats.failed_calls += 1
@@ -1169,9 +1169,9 @@ class TestEdgeCases:
         assert "deepseek-v4-pro" in models
         assert "deepseek-v4-flash" in models
 
-    def test_provider_stats_dataclass_immutable_pattern(self):
-        """验证 ProviderStats 字段按预期工作。"""
-        stats = ProviderStats(total_calls=5, successful_calls=3, failed_calls=2)
+    def test_provider_stats_accumulator_mutable_pattern(self):
+        """验证 ProviderStatsAccumulator 字段按预期工作。"""
+        stats = ProviderStatsAccumulator(total_calls=5, successful_calls=3, failed_calls=2)
         assert stats.total_calls == 5
         assert stats.successful_calls == 3
         assert stats.failed_calls == 2

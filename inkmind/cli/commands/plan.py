@@ -49,6 +49,7 @@ class PlanCommand(BaseCommand):
                 pipeline.current_chapter_index = 0
 
             await uow.pipelines.save(pipeline)
+            await uow.commit()
 
         formatter.success(
             f"已规划前 {args.count} 章",

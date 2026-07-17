@@ -1,23 +1,30 @@
-"""Provider 抽象基类 — 统一接口 + 连接池 + 重试逻辑。"""
+"""Provider 抽象基类 — 统一接口 + 连接池 + 重试逻辑 + 观测埋点 + 速率限制。"""
 
 from __future__ import annotations
 
 import asyncio
 import os
+import statistics
 import time  # latency tracking
 from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import AsyncGenerator, Dict, List, Optional, Tuple
+from datetime import datetime, timezone
+from typing import AsyncGenerator, Callable, Dict, List, Optional, Tuple
 
 import httpx
 
+from inkmind.llm.rate_limiter import RateLimiter
 from inkmind.models.llm import ProviderConfig, RetryConfig
 
 
 # ---------------------------------------------------------------------------
 # 数据类
 # ---------------------------------------------------------------------------
+
+class RequestCancelledError(RuntimeError):
+    """调用方通过 cancel() 主动中断的请求（用于 Stats error_type 分类）。"""
+
 
 @dataclass
 class LLMResponse:
@@ -29,11 +36,93 @@ class LLMResponse:
     usage: Optional[Dict[str, int]] = None
 
 
-@dataclass
+@dataclass(frozen=True)
 class ProviderStats:
-    """Provider 运行时统计。
-    
+    """单次 LLM 调用的不可变统计快照（ADR-0010 §10-A）。
+
+    每次 chat() / chat_stream() 调用结束产生一份，追加到
+    ``BaseProvider.stats_history`` 并经 sink 汇入 ``LLMClient`` 聚合。
+    """
+    provider_name: str          # 实际使用的 Provider（降级后可能是备用）
+    model_name: str             # 实际使用的模型
+    latency_ms: float           # 端到端延迟（毫秒）
+    prompt_tokens: int          # 输入 Token 数
+    completion_tokens: int      # 输出 Token 数
+    total_tokens: int           # 总 Token 数
+    estimated_cost: float       # 估算费用（USD）
+    success: bool               # 是否成功
+    error_type: Optional[str]   # 失败时的错误类别（timeout / rate_limit / auth / cancelled / unknown）
+    degraded: bool              # 是否经过降级链
+    retry_count: int            # 重试次数
+    timestamp: datetime         # 调用时间
+
+
+def aggregate_snapshots(history: List[ProviderStats]) -> dict:
+    """聚合调用快照历史，返回会话级汇总统计（ADR-0010 §10-C）。
+
+    LLMClient 与离线 ScriptedLLMClient 共用本实现。
+    """
+    total_calls = len(history)
+    if total_calls == 0:
+        return {
+            "total_calls": 0,
+            "total_tokens": 0,
+            "total_cost": 0.0,
+            "avg_latency_ms": 0.0,
+            "success_rate": 0.0,
+            "degradation_rate": 0.0,
+            "provider_breakdown": {},
+        }
+
+    by_provider: Dict[str, List[ProviderStats]] = {}
+    for s in history:
+        by_provider.setdefault(s.provider_name, []).append(s)
+
+    breakdown: Dict[str, dict] = {}
+    for name, entries in by_provider.items():
+        n = len(entries)
+        breakdown[name] = {
+            "calls": n,
+            "total_tokens": sum(s.total_tokens for s in entries),
+            "total_cost": sum(s.estimated_cost for s in entries),
+            "avg_latency_ms": statistics.mean(s.latency_ms for s in entries),
+            "success_rate": sum(1 for s in entries if s.success) / n,
+        }
+
+    return {
+        "total_calls": total_calls,
+        "total_tokens": sum(s.total_tokens for s in history),
+        "total_cost": sum(s.estimated_cost for s in history),
+        "avg_latency_ms": statistics.mean(s.latency_ms for s in history),
+        "success_rate": sum(1 for s in history if s.success) / total_calls,
+        "degradation_rate": sum(1 for s in history if s.degraded) / total_calls,
+        "provider_breakdown": breakdown,
+    }
+
+
+def _classify_error(exc: Optional[BaseException]) -> str:
+    """将调用异常归类为 ADR-0010 的错误类别。"""
+    if isinstance(exc, RequestCancelledError):
+        return "cancelled"
+    if isinstance(exc, httpx.TimeoutException):
+        return "timeout"
+    if isinstance(exc, httpx.HTTPStatusError):
+        status = exc.response.status_code
+        if status == 429:
+            return "rate_limit"
+        if status in (401, 403):
+            return "auth"
+        return "unknown"
+    return "unknown"
+
+
+@dataclass
+class ProviderStatsAccumulator:
+    """Provider 运行时统计（可变累计器）。
+
     包含调用计数、延迟追踪、Token 用量和成本估算。
+    与单次调用快照 ProviderStats 互补：本类提供
+    ``LLMClient.get_stats()`` 的 per-Provider 汇总视图。
     """
     # 调用计数
     total_calls: int = 0
@@ -148,7 +237,17 @@ class BaseProvider(ABC):
         self._semaphore = asyncio.Semaphore(config.max_concurrent)
         self._cancel_event = asyncio.Event()
         self._client: Optional[httpx.AsyncClient] = None
-        self.stats = ProviderStats()
+        self.stats = ProviderStatsAccumulator()
+        # ADR-0010 §10-A：每次调用一份不可变快照
+        self.stats_history: List[ProviderStats] = []
+        # 快照 sink（LLMClient 注入，record_stats 回调）
+        self._stats_sink: Optional[Callable[[ProviderStats], None]] = None
+        # ADR-0010 §10-E：per-Provider 速率限制（0 = 不限制）
+        self._rate_limiter: Optional[RateLimiter] = (
+            RateLimiter(config.max_calls_per_minute, window_seconds=60.0)
+            if config.max_calls_per_minute > 0
+            else None
+        )
 
     # ── 子类必须实现的抽象方法 ──────────────────────────────
 
@@ -195,12 +294,25 @@ class BaseProvider(ABC):
         prompt: str,
         model: Optional[str] = None,
         system_prompt: Optional[str] = None,
+        *,
+        degraded: bool = False,
         **kwargs,
     ) -> LLMResponse:
-        """统一非流式 chat 接口。"""
+        """统一非流式 chat 接口。
+
+        Args:
+            degraded: 本调用是否经由降级链（由 ModelRouter 标记），
+                      记入 Stats 快照（ADR-0010 §10-A）。
+        """
         effective_model = model or (self.config.models[0] if self.config.models else "unknown")
         messages = self._build_messages(prompt, system_prompt)
         client = await self._get_client()
+        call_start = time.monotonic()
+
+        def _snap(**kw) -> ProviderStats:
+            return self._record_call(
+                model=effective_model, start=call_start, degraded=degraded, **kw
+            )
 
         async with self._semaphore:
             last_error: Optional[Exception] = None
@@ -210,30 +322,37 @@ class BaseProvider(ABC):
 
                 # 可中断检查
                 if self._cancel_event.is_set():
-                    raise RuntimeError("Request cancelled by caller")
+                    error = RequestCancelledError("Request cancelled by caller")
+                    _snap(success=False, error=error, retry_count=attempt)
+                    raise error
 
                 try:
                     if attempt > 0:
                         await asyncio.sleep(self.retry.base_delay_s)
+                    if self._rate_limiter is not None:
+                        await self._rate_limiter.acquire()
 
                     response = await self._do_chat(client, messages, effective_model, **kwargs)
-                    
+
                     # 记录成功调用的延迟和用量
                     elapsed = time.monotonic() - start
                     self.stats.record_success(elapsed, response.usage)
                     self.stats.successful_calls += 1
+                    _snap(success=True, usage=response.usage, retry_count=attempt)
                     return response
 
                 except httpx.HTTPStatusError as e:
                     self.stats.failed_calls += 1
                     status = e.response.status_code
                     if status in self.retry.non_retryable_statuses or attempt == self.retry.max_retries:
+                        _snap(success=False, error=e, retry_count=attempt)
                         raise
                     last_error = e
 
                 except (httpx.ConnectError, httpx.RemoteProtocolError, httpx.TimeoutException) as e:
                     self.stats.failed_calls += 1
                     if attempt == self.retry.max_retries:
+                        _snap(success=False, error=e, retry_count=attempt)
                         raise
                     last_error = e
 
@@ -244,20 +363,32 @@ class BaseProvider(ABC):
         prompt: str,
         model: Optional[str] = None,
         system_prompt: Optional[str] = None,
+        *,
+        degraded: bool = False,
         **kwargs,
     ) -> AsyncGenerator[str, None]:
         """统一流式 chat 接口。"""
         effective_model = model or (self.config.models[0] if self.config.models else "unknown")
         messages = self._build_messages(prompt, system_prompt)
         client = await self._get_client()
+        call_start = time.monotonic()
+
+        def _snap(**kw) -> ProviderStats:
+            return self._record_call(
+                model=effective_model, start=call_start, degraded=degraded, **kw
+            )
 
         async with self._semaphore:
             for attempt in range(self.retry.max_retries + 1):
                 if self._cancel_event.is_set():
-                    raise RuntimeError("Request cancelled by caller")
+                    error = RequestCancelledError("Request cancelled by caller")
+                    _snap(success=False, error=error, retry_count=attempt)
+                    raise error
                 try:
                     if attempt > 0:
                         await asyncio.sleep(self.retry.base_delay_s)
+                    if self._rate_limiter is not None:
+                        await self._rate_limiter.acquire()
                     self.stats.total_calls += 1
                     start = time.monotonic()
                     async for chunk in self._do_chat_stream(client, messages, effective_model, **kwargs):
@@ -265,15 +396,18 @@ class BaseProvider(ABC):
                     elapsed = time.monotonic() - start
                     self.stats.record_success(elapsed)
                     self.stats.successful_calls += 1
+                    _snap(success=True, retry_count=attempt)
                     return
                 except httpx.HTTPStatusError as e:
                     self.stats.failed_calls += 1
                     status = e.response.status_code
                     if status in self.retry.non_retryable_statuses or attempt == self.retry.max_retries:
+                        _snap(success=False, error=e, retry_count=attempt)
                         raise
-                except (httpx.ConnectError, httpx.RemoteProtocolError, httpx.TimeoutException):
+                except (httpx.ConnectError, httpx.RemoteProtocolError, httpx.TimeoutException) as e:
                     self.stats.failed_calls += 1
                     if attempt == self.retry.max_retries:
+                        _snap(success=False, error=e, retry_count=attempt)
                         raise
 
     def cancel(self) -> None:
@@ -285,6 +419,47 @@ class BaseProvider(ABC):
         self._cancel_event.clear()
 
     # ── 内部方法 ──────────────────────────────────────────
+
+    def _record_call(
+        self,
+        *,
+        model: str,
+        start: float,
+        success: bool,
+        usage: Optional[Dict[str, int]] = None,
+        error: Optional[BaseException] = None,
+        retry_count: int = 0,
+        degraded: bool = False,
+    ) -> ProviderStats:
+        """埋点（ADR-0010 §10-B）：生成不可变快照，追加历史并转发 sink。
+
+        作为基类 mixin 方法统一实现，不侵入各 Provider 的业务逻辑。
+        """
+        prompt_tokens = completion_tokens = total_tokens = 0
+        if usage:
+            prompt_tokens = usage.get("prompt_tokens", 0) or 0
+            completion_tokens = usage.get("completion_tokens", 0) or 0
+            total_tokens = usage.get("total_tokens") or (
+                prompt_tokens + completion_tokens
+            )
+        snapshot = ProviderStats(
+            provider_name=self.config.name,
+            model_name=model,
+            latency_ms=(time.monotonic() - start) * 1000.0,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+            estimated_cost=0.0,
+            success=success,
+            error_type=None if success else _classify_error(error),
+            degraded=degraded,
+            retry_count=retry_count,
+            timestamp=datetime.now(timezone.utc),
+        )
+        self.stats_history.append(snapshot)
+        if self._stats_sink is not None:
+            self._stats_sink(snapshot)
+        return snapshot
 
     def _resolve_api_key(self) -> str:
         """从环境变量解析 API Key。"""

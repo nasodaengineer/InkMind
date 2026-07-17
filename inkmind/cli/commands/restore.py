@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from inkmind.cli.base_command import BaseCommand
-from inkmind.cli.db import get_session
+from inkmind.cli.db import get_uow
 from inkmind.storage.snapshot import JSONSnapshot
 
 COMMAND = "restore"
@@ -29,10 +29,10 @@ class RestoreCommand(BaseCommand):
             formatter.error(f"快照文件不存在: {snap_path}")
             return
 
-        async with get_session(db_path) as session:
-            snap = JSONSnapshot(session)
+        async with get_uow(db_path) as uow:
+            snap = JSONSnapshot(uow.session)
             restored_id = await snap.restore(snap_path)
-            await session.commit()
+            await uow.commit()
 
         formatter.success(
             f"快照已恢复: {snap_path}",

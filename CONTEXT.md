@@ -137,6 +137,8 @@ L2 压缩任务。异步执行，生命周期：`PENDING` → `RUNNING` → `COM
 - **OllamaProvider** — Ollama 本地模型 Provider（OpenAI 兼容端点）
 - **LLMClient** — 统一客户端入口，封装 ModelRouter + ProviderFactory
 - **ProviderFactory** — Provider 实例工厂，按配置创建并管理 Provider 生命周期
-- **ProviderStats** — Provider 运行时统计：total_calls、successful_calls、failed_calls、fallback_used
+- **ProviderStats** — 单次调用的不可变统计快照（frozen dataclass）：provider_name、model_name、latency_ms、prompt/completion/total_tokens、estimated_cost、success、error_type、degraded、retry_count、timestamp（ADR-0010 §10-A）
+- **ProviderStatsAccumulator** — Provider 运行时累计器（可变）：total_calls、successful_calls、failed_calls、fallback_used；供 `LLMClient.get_stats()` 汇总视图
+- **RateLimiter** — per-Provider 滑动窗口速率限制器；配置 `ProviderConfig.max_calls_per_minute`（默认 0 = 不限制）（ADR-0010 §10-E）
 - **降级 (Fallback)** — 主模型失败时，自动按 fallback_models 列表依次尝试，兜底 default_model
 - **可中断 (Cancellable)** — 请求不设超时，由 `cancel()` 主动中断所有进行中请求

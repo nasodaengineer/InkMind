@@ -7,9 +7,8 @@ from uuid import UUID
 from sqlalchemy import select
 
 from inkmind.cli.base_command import BaseCommand
-from inkmind.cli.db import get_session
+from inkmind.cli.db import get_uow
 from inkmind.storage.models import ChapterModel
-from inkmind.storage.unit_of_work import UnitOfWork
 
 COMMAND = "review"
 HELP = "对当前最新章节启动 1 × Editor 评审"
@@ -34,7 +33,8 @@ class ReviewCommand(BaseCommand):
             )
             return
 
-        async with get_session(db_path) as session:
+        async with get_uow(db_path) as uow:
+            session = uow.session
             result = await session.execute(
                 select(ChapterModel)
                 .where(
@@ -59,13 +59,12 @@ class ReviewCommand(BaseCommand):
                 formatter.error("没有找到可评审的章节")
                 return
 
-            uow = UnitOfWork(session)
             await uow.t3_editor_complete_review(
                 novel_id=novel_id,
                 chapter_index=chapter.chapter_index,
                 is_approved=True,
             )
-            await session.commit()
+            await uow.commit()
 
         formatter.success(
             f"章节「{chapter.title}」（第 {chapter.chapter_index} 章）评审通过",

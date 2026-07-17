@@ -25,6 +25,9 @@ class ProviderConfig(BaseModel):
     models: List[str] = Field(default_factory=list, description="该 Provider 支持的模型名列表")
     max_concurrent: int = Field(default=3, ge=1, description="最大并发请求数（连接池大小）")
     max_keepalive: int = Field(default=10, ge=1, description="httpx 连接池 keepalive 上限")
+    max_calls_per_minute: int = Field(
+        default=0, ge=0, description="每分钟最大调用次数（速率限制）；0 表示不限制"
+    )
 
 
 class RetryConfig(BaseModel):

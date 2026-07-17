@@ -22,10 +22,14 @@ async def get_session(db_path: str) -> AsyncGenerator[AsyncSession, None]:
 
 
 @asynccontextmanager
-async def get_uow(db_path: str) -> AsyncGenerator[UnitOfWork, None]:
-    """获取 UnitOfWork 实例。"""
+async def get_uow(db_path: str, timeout: float = 5.0) -> AsyncGenerator[UnitOfWork, None]:
+    """获取 UnitOfWork 实例。
+
+    保持 session/repos 可用的同时接入 FileLock（ADR-0011 §11-C）：
+    写事务 ``uow.commit()`` 在 ``{db_path}.lock`` 文件锁保护下序列化。
+    """
     async with get_session(db_path) as session:
-        yield UnitOfWork(session)
+        yield UnitOfWork(session, db_path=db_path, timeout=timeout)
 
 
 def db_path_from_config(cfg) -> str:
