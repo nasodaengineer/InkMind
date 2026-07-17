@@ -1,0 +1,283 @@
+{
+  "$schema": "https://solon.noear.org/soloncode/settings.schema.json",
+  "models": {
+  },
+  "mcpServers": {
+  },
+  "apiServers": {
+  },
+  "mountPools": {
+    "@claude_skills": {
+      "scope": "workspace",
+      "description": "",
+      "type": 0,
+      "path": "~/.claude/skills/",
+      "primary": false,
+      "enabled": false,
+      "writeable": true
+    },
+    "@local_agents_skills": {
+      "scope": "workspace",
+      "description": "通用技能",
+      "type": 0,
+      "path": "./.agents/skills/",
+      "primary": false,
+      "enabled": true,
+      "writeable": true
+    }
+  },
+  "lspServers": {
+    "java": {
+      "scope": "workspace",
+      "command": [
+        "jdtls"
+      ],
+      "extensions": [
+        ".java"
+      ],
+      "enabled": false,
+      "initialization": {
+      },
+      "env": {
+      }
+    },
+    "typescript": {
+      "scope": "workspace",
+      "command": [
+        "typescript-language-server",
+        "--stdio"
+      ],
+      "extensions": [
+        ".ts",
+        ".tsx",
+        ".js",
+        ".jsx",
+        ".mjs",
+        ".cjs",
+        ".mts",
+        ".cts"
+      ],
+      "enabled": false,
+      "initialization": {
+      },
+      "env": {
+      }
+    },
+    "go": {
+      "scope": "workspace",
+      "command": [
+        "gopls"
+      ],
+      "extensions": [
+        ".go"
+      ],
+      "enabled": false,
+      "initialization": {
+      },
+      "env": {
+      }
+    },
+    "python": {
+      "scope": "workspace",
+      "command": [
+        "pyright-langserver",
+        "--stdio"
+      ],
+      "extensions": [
+        ".py",
+        ".pyi"
+      ],
+      "enabled": false,
+      "initialization": {
+      },
+      "env": {
+      }
+    },
+    "rust": {
+      "scope": "workspace",
+      "command": [
+        "rust-analyzer"
+      ],
+      "extensions": [
+        ".rs"
+      ],
+      "enabled": false,
+      "initialization": {
+      },
+      "env": {
+      }
+    },
+    "c-cpp": {
+      "scope": "workspace",
+      "command": [
+        "clangd",
+        "--background-index",
+        "--clang-tidy"
+      ],
+      "extensions": [
+        ".c",
+        ".h",
+        ".cpp",
+        ".hpp",
+        ".cc",
+        ".cxx",
+        ".hxx",
+        ".c++",
+        ".h++",
+        ".hh"
+      ],
+      "enabled": false,
+      "initialization": {
+      },
+      "env": {
+      }
+    },
+    "csharp": {
+      "scope": "workspace",
+      "command": [
+        "roslyn-language-server",
+        "--stdio",
+        "--autoLoadProjects"
+      ],
+      "extensions": [
+        ".cs",
+        ".csx"
+      ],
+      "enabled": false,
+      "initialization": {
+      },
+      "env": {
+      }
+    },
+    "ruby": {
+      "scope": "workspace",
+      "command": [
+        "solargraph",
+        "stdio"
+      ],
+      "extensions": [
+        ".rb",
+        ".rake",
+        ".gemspec",
+        ".ru"
+      ],
+      "enabled": false,
+      "initialization": {
+      },
+      "env": {
+      }
+    },
+    "php": {
+      "scope": "workspace",
+      "command": [
+        "intelephense",
+        "--stdio"
+      ],
+      "extensions": [
+        ".php"
+      ],
+      "enabled": false,
+      "initialization": {
+      },
+      "env": {
+      }
+    },
+    "bash": {
+      "scope": "workspace",
+      "command": [
+        "bash-language-server",
+        "start"
+      ],
+      "extensions": [
+        ".sh",
+        ".bash",
+        ".zsh",
+        ".ksh"
+      ],
+      "enabled": false,
+      "initialization": {
+      },
+      "env": {
+      }
+    },
+    "lua": {
+      "scope": "workspace",
+      "command": [
+        "lua-language-server"
+      ],
+      "extensions": [
+        ".lua"
+      ],
+      "enabled": false,
+      "initialization": {
+      },
+      "env": {
+      }
+    },
+    "dart": {
+      "scope": "workspace",
+      "command": [
+        "dart",
+        "language-server",
+        "--lsp"
+      ],
+      "extensions": [
+        ".dart"
+      ],
+      "enabled": false,
+      "initialization": {
+      },
+      "env": {
+      }
+    },
+    "swift": {
+      "scope": "workspace",
+      "command": [
+        "sourcekit-lsp"
+      ],
+      "extensions": [
+        ".swift",
+        ".objc",
+        ".objcpp"
+      ],
+      "enabled": false,
+      "initialization": {
+      },
+      "env": {
+      }
+    },
+    "kotlin": {
+      "scope": "workspace",
+      "command": [
+        "kotlin-language-server"
+      ],
+      "extensions": [
+        ".kt",
+        ".kts"
+      ],
+      "enabled": false,
+      "initialization": {
+      },
+      "env": {
+      }
+    },
+    "yaml": {
+      "scope": "workspace",
+      "command": [
+        "yaml-language-server",
+        "--stdio"
+      ],
+      "extensions": [
+        ".yaml",
+        ".yml"
+      ],
+      "enabled": false,
+      "initialization": {
+      },
+      "env": {
+      }
+    }
+  },
+  "providers": {
+  }
+}

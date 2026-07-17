@@ -1,0 +1,24 @@
+# 项目要求排除
+.repo/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 本地数据库 / 运行产物
+*.db
+*.sqlite3
+
+# soloncode 本地运行状态（日志含敏感上下文）
+.soloncode/logs/
+.soloncode/sessions/
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
