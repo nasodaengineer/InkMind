@@ -22,3 +22,7 @@ __pycache__/
 .vscode/
 .DS_Store
 Thumbs.db
+.gstack/
+
+# Claude Code 会话产物
+.claude/worktrees/
