@@ -24,5 +24,15 @@ __pycache__/
 Thumbs.db
 .gstack/
 
+# 开发笔记 / 工单归档
+.scratch/
+
 # Claude Code 会话产物
 .claude/worktrees/
+
+# TypeScript 构建产物
+*.tsbuildinfo
+
+# Web 前端
+web/node_modules/
+web/dist/
