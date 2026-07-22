@@ -87,6 +87,7 @@ class DatabaseManager:
         Issue #35: 检测 chapters 无 volume_id 列则 ALTER TABLE 加列；
         volumes / outline_spines 表由 create_tables 自动创建；
         创建默认卷回填所有旧章节的 volume_id。
+        Issue #44: 建 FTS5 虚拟表 fragments_fts 用于素材全文搜索。
         """
         async with self._engine.begin() as conn:
             # 1. 检测并添加 chapters 新列
@@ -148,6 +149,14 @@ class DatabaseManager:
                     ),
                     {"vid": vol_uuid, "nid": nid},
                 )
+
+            # 3. Issue #44: 建 FTS5 虚拟表 fragments_fts（素材全文搜索）
+            from inkmind.storage.search import FTS5_TABLE_SQL
+            try:
+                await conn.execute(text(FTS5_TABLE_SQL))
+            except Exception:
+                # FTS5 不可用时不阻塞
+                pass
 
     async def migrate(self) -> None:
         """外部显式调用迁移入口。"""
