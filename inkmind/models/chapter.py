@@ -53,6 +53,14 @@ class Chapter(BaseModel):
     source_trace: str = Field(default="", description="来源追踪: 模型标识")
     outline_id: UUID | None = Field(default=None, description="关联的大纲 ID")
 
+    # ── 卷与节奏（Issue #35） ──
+    volume_id: UUID | None = Field(default=None, description="所属卷 ID")
+    rhythm_marker: str | None = Field(
+        default=None, description="节奏标记: climax(▲) / big_climax(★) / None"
+    )
+    pov: str = Field(default="", description="视角角色")
+    involved: list[str] = Field(default_factory=list, description="出场角色列表")
+
     # ── 版本管理 ──
     version: int = Field(default=1, ge=1, description="当前版本号")
     is_baseline: bool = Field(default=False, description="是否标记为基线版本")

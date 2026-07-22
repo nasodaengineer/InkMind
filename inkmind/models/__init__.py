@@ -69,7 +69,18 @@ from inkmind.models.memory import (
     TimeRange,
 )
 
-from inkmind.models.novel import Novel, NovelMetadata
+from inkmind.models.materials import (
+    FRAGMENT_TYPES,
+    MATERIAL_CHUNK_STATUSES,
+    MATERIAL_SOURCE_STATUSES,
+    MaterialChunk,
+    MaterialFragment,
+    MaterialSource,
+)
+
+from inkmind.models.novel import Novel, NovelMetadata, OutlineSpine, Volume
+
+from inkmind.models.run import Run, RunKind, RunStatus
 
 from inkmind.models.world import (
     Faction,
@@ -145,9 +156,22 @@ __all__ = [
     "MemoryTier",
     "SlidingWindowState",
     "TimeRange",
+    # materials
+    "FRAGMENT_TYPES",
+    "MATERIAL_CHUNK_STATUSES",
+    "MATERIAL_SOURCE_STATUSES",
+    "MaterialChunk",
+    "MaterialFragment",
+    "MaterialSource",
     # novel
     "Novel",
     "NovelMetadata",
+    "Volume",
+    "OutlineSpine",
+    # run
+    "Run",
+    "RunKind",
+    "RunStatus",
     # world
     "Faction",
     "Location",

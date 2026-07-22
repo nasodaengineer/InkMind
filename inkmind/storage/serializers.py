@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from inkmind.models.agent import (
     ChapterStatus,
@@ -16,7 +16,7 @@ from inkmind.models.agent import (
 )
 from inkmind.models.chapter import Chapter, ChapterVersion
 from inkmind.models.character import Character, CharacterTimelineEntry
-from inkmind.models.novel import Novel, NovelMetadata
+from inkmind.models.novel import Novel, NovelMetadata, OutlineSpine, Volume
 from inkmind.models.world import (
     Faction,
     Location,
@@ -31,7 +31,9 @@ from inkmind.storage.models import (
     ChapterVersionModel,
     CharacterModel,
     NovelModel,
+    OutlineSpineModel,
     PipelineStateModel,
+    VolumeModel,
     WorldModel,
 )
 
@@ -40,8 +42,8 @@ from inkmind.storage.models import (
 # ═══════════════════════════════════════════════════════
 
 
-def _to_str(u: UUID | None) -> str:
-    return str(u) if u is not None else ""
+def _to_str(u: UUID | None) -> str | None:
+    return str(u) if u is not None else None
 
 
 def _to_uuid(s: str | None) -> UUID | None:
@@ -112,6 +114,10 @@ def chapter_to_dict(model: ChapterModel) -> dict:
         "key_events": model.key_events or [],
         "source_trace": model.source_trace,
         "outline_id": _to_uuid(model.outline_id),
+        "volume_id": _to_uuid(model.volume_id) if model.volume_id else None,
+        "rhythm_marker": model.rhythm_marker,
+        "pov": model.pov or "",
+        "involved": model.involved or [],
         "version": model.version,
         "is_baseline": model.is_baseline,
         "created_at": model.created_at or datetime.now(timezone.utc),
@@ -135,6 +141,14 @@ def dict_to_chapter(data: dict) -> Chapter:
             if isinstance(data.get("outline_id"), UUID)
             else UUID(data["outline_id"]) if data.get("outline_id") else None
         ),
+        volume_id=(
+            data["volume_id"]
+            if isinstance(data.get("volume_id"), UUID)
+            else UUID(data["volume_id"]) if data.get("volume_id") else None
+        ),
+        rhythm_marker=data.get("rhythm_marker"),
+        pov=data.get("pov", ""),
+        involved=data.get("involved", []),
         version=data.get("version", 1),
         is_baseline=data.get("is_baseline", False),
         created_at=data.get("created_at"),
@@ -154,6 +168,10 @@ def chapter_to_orm(chapter: Chapter) -> dict:
         "key_events": chapter.key_events,
         "source_trace": chapter.source_trace,
         "outline_id": _to_str(chapter.outline_id) if chapter.outline_id else None,
+        "volume_id": _to_str(chapter.volume_id),
+        "rhythm_marker": chapter.rhythm_marker,
+        "pov": chapter.pov,
+        "involved": chapter.involved,
         "version": chapter.version,
         "is_baseline": chapter.is_baseline,
     }
@@ -437,4 +455,162 @@ def pipeline_state_to_orm(state: PipelineState) -> dict:
         "current_chapter_index": state.current_chapter_index,
         "iteration": state.iteration,
         "max_iterations": state.max_iterations,
+    }
+
+
+# ═══════════════════════════════════════════════════════
+#  Run
+# ═══════════════════════════════════════════════════════
+
+
+def run_to_dict(model: RunsModel) -> dict:
+    return {
+        "id": UUID(model.uuid),
+        "novel_id": UUID(model.novel_id),
+        "chapter_id": _to_uuid(model.chapter_id),
+        "kind": RunKind(model.kind),
+        "status": RunStatus(model.status),
+        "phase": model.phase,
+        "partial_content": model.partial_content,
+        "llm_stats": model.llm_stats or {},
+        "overwritten_values": model.overwritten_values,
+        "started_at": model.started_at,
+        "completed_at": model.completed_at,
+        "created_at": model.created_at or datetime.now(timezone.utc),
+        "updated_at": model.updated_at or datetime.now(timezone.utc),
+    }
+
+
+def dict_to_run(data: dict) -> Run:
+    return Run(
+        id=data["id"] if isinstance(data.get("id"), UUID) else UUID(data["id"]),
+        novel_id=data["novel_id"] if isinstance(data.get("novel_id"), UUID) else UUID(data["novel_id"]),
+        chapter_id=(
+            data["chapter_id"]
+            if isinstance(data.get("chapter_id"), UUID)
+            else UUID(data["chapter_id"]) if data.get("chapter_id") else None
+        ),
+        kind=RunKind(data["kind"]) if isinstance(data.get("kind"), str) else data["kind"],
+        status=RunStatus(data["status"]) if isinstance(data.get("status"), str) else data["status"],
+        phase=data.get("phase", ""),
+        partial_content=data.get("partial_content", ""),
+        llm_stats=data.get("llm_stats", {}),
+        overwritten_values=data.get("overwritten_values"),
+        started_at=data.get("started_at"),
+        completed_at=data.get("completed_at"),
+        created_at=data.get("created_at"),
+        updated_at=data.get("updated_at"),
+    )
+
+
+def run_to_orm(run: Run) -> dict:
+    return {
+        "uuid": str(run.id),
+        "novel_id": str(run.novel_id),
+        "chapter_id": str(run.chapter_id) if run.chapter_id else None,
+        "kind": run.kind.value,
+        "status": run.status.value,
+        "phase": run.phase,
+        "partial_content": run.partial_content,
+        "llm_stats": run.llm_stats,
+        "overwritten_values": run.overwritten_values,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+    }
+
+
+# ═══════════════════════════════════════════════════════
+#  Volume
+# ═══════════════════════════════════════════════════════
+
+
+def volume_to_dict(model: VolumeModel) -> dict:
+    return {
+        "id": UUID(model.uuid),
+        "novel_id": UUID(model.novel_id),
+        "volume_index": model.volume_index,
+        "title": model.title,
+        "stage_goal": model.stage_goal,
+        "main_line": model.main_line,
+        "side_line": model.side_line,
+        "volume_cliffhanger": model.volume_cliffhanger,
+        "planned_size": model.planned_size,
+        "created_at": model.created_at or datetime.now(timezone.utc),
+        "updated_at": model.updated_at or datetime.now(timezone.utc),
+    }
+
+
+def dict_to_volume(data: dict) -> Volume:
+    return Volume(
+        id=data["id"] if isinstance(data.get("id"), UUID) else UUID(data["id"]),
+        novel_id=data["novel_id"] if isinstance(data.get("novel_id"), UUID) else UUID(data["novel_id"]),
+        volume_index=data["volume_index"],
+        title=data["title"],
+        stage_goal=data.get("stage_goal", ""),
+        main_line=data.get("main_line", ""),
+        side_line=data.get("side_line", ""),
+        volume_cliffhanger=data.get("volume_cliffhanger", ""),
+        planned_size=data.get("planned_size", 10),
+        created_at=data.get("created_at"),
+        updated_at=data.get("updated_at"),
+    )
+
+
+def volume_to_orm(volume: Volume) -> dict:
+    return {
+        "uuid": str(volume.id),
+        "novel_id": str(volume.novel_id),
+        "volume_index": volume.volume_index,
+        "title": volume.title,
+        "stage_goal": volume.stage_goal,
+        "main_line": volume.main_line,
+        "side_line": volume.side_line,
+        "volume_cliffhanger": volume.volume_cliffhanger,
+        "planned_size": volume.planned_size,
+    }
+
+
+# ═══════════════════════════════════════════════════════
+#  OutlineSpine
+# ═══════════════════════════════════════════════════════
+
+
+def outline_spine_to_dict(model: OutlineSpineModel) -> dict:
+    return {
+        "novel_id": UUID(model.novel_id),
+        "main_line": model.main_line,
+        "core_conflict": model.core_conflict,
+        "ending": model.ending,
+        "selling_points": model.selling_points,
+        "world_background": model.world_background,
+        "golden_finger": model.golden_finger,
+        "created_at": model.created_at or datetime.now(timezone.utc),
+        "updated_at": model.updated_at or datetime.now(timezone.utc),
+    }
+
+
+def dict_to_outline_spine(data: dict) -> OutlineSpine:
+    return OutlineSpine(
+        novel_id=data["novel_id"] if isinstance(data.get("novel_id"), UUID) else UUID(data["novel_id"]),
+        main_line=data.get("main_line", ""),
+        core_conflict=data.get("core_conflict", ""),
+        ending=data.get("ending", ""),
+        selling_points=data.get("selling_points", ""),
+        world_background=data.get("world_background", ""),
+        golden_finger=data.get("golden_finger", ""),
+        created_at=data.get("created_at"),
+        updated_at=data.get("updated_at"),
+    )
+
+
+def outline_spine_to_orm(spine: OutlineSpine) -> dict:
+    return {
+        "uuid": str(uuid4()),
+        "novel_id": str(spine.novel_id),
+        "main_line": spine.main_line,
+        "core_conflict": spine.core_conflict,
+        "ending": spine.ending,
+        "selling_points": spine.selling_points,
+        "world_background": spine.world_background,
+        "golden_finger": spine.golden_finger,
     }

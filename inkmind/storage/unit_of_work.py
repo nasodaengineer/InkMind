@@ -14,6 +14,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import AsyncIterator, Callable, Optional
 from uuid import UUID
 
@@ -23,15 +24,23 @@ from inkmind.storage.concurrency import FileLock
 
 from inkmind.models.agent import ChapterStatus, PipelineState
 from inkmind.models.chapter import Chapter, ChapterVersion
+from inkmind.models.run import Run, RunKind, RunStatus
 from inkmind.storage.idempotency import (
     IdempotencyGuard,
     compute_packet_digest,
 )
 from inkmind.storage.repositories import (
+    AppSettingsRepository,
     ChapterRepository,
     CharacterRepository,
+    MaterialChunkRepository,
+    MaterialFragmentRepository,
+    MaterialSourceRepository,
     NovelRepository,
+    OutlineSpineRepository,
     PipelineStateRepository,
+    RunRepository,
+    VolumeRepository,
     WorldRepository,
 )
 from inkmind.storage.digest import compute_content_digest
@@ -69,6 +78,13 @@ class UnitOfWork:
         self.characters = CharacterRepository(self._session) if self._session else None
         self.worlds = WorldRepository(self._session) if self._session else None
         self.pipelines = PipelineStateRepository(self._session) if self._session else None
+        self.runs = RunRepository(self._session) if self._session else None
+        self.volumes = VolumeRepository(self._session) if self._session else None
+        self.spines = OutlineSpineRepository(self._session) if self._session else None
+        self.material_sources = MaterialSourceRepository(self._session) if self._session else None
+        self.material_chunks = MaterialChunkRepository(self._session) if self._session else None
+        self.material_fragments = MaterialFragmentRepository(self._session) if self._session else None
+        self.app_settings = AppSettingsRepository(self._session) if self._session else None
         self.idempotency = IdempotencyGuard(self._session) if self._session else None
         self._lock_held = False
 
@@ -304,6 +320,289 @@ class UnitOfWork:
                     },
                 )
             )
+
+    # ═══════════════════════════════════════════════════
+    #  T6: 素材导入
+    # ═══════════════════════════════════════════════════
+
+    async def t6_import_material(
+        self,
+        novel_id: UUID,
+        raw_text: str,
+        max_total_words: int = 100_000,
+        chunk_max_words: int = 8000,
+    ) -> MaterialSource:
+        """T6: 导入素材原文。
+
+        1. 计算 content_digest (SHA-256)
+        2. 幂等检查: (novel_id, content_digest) UNIQUE → 重复返回已有 source
+        3. 8000 字/块段落边界吸附
+        4. 10 万字上限校验
+        5. 创建 MaterialSource + MaterialChunk 记录（状态 pending）
+
+        Returns:
+            新建（或幂等匹配）的 MaterialSource
+        """
+        from uuid import uuid4
+
+        from inkmind.models.materials import MaterialChunk, MaterialSource
+        from inkmind.storage.digest import compute_content_digest
+
+        # 1. 计算 digest
+        digest = compute_content_digest(raw_text)
+
+        # 2. 幂等检查
+        existing = await self.material_sources.find_by_digest(novel_id, digest)
+        if existing is not None:
+            return existing
+
+        # 3. 段落吸附切块
+        paragraphs = raw_text.split("\n")
+        chunks: list[str] = []
+        current_chunk: list[str] = []
+        current_len = 0
+
+        for para in paragraphs:
+            para_len = len(para)
+            # 如果当前段落本身超过 chunk_max_words，强制单独成块
+            if para_len > chunk_max_words and not current_chunk:
+                chunks.append(para)
+                continue
+            # 如果加上当前段落后超过限制，先保存当前块再开始新块
+            if current_len + para_len > chunk_max_words and current_chunk:
+                chunks.append("\n".join(current_chunk))
+                current_chunk = [para]
+                current_len = para_len
+            else:
+                current_chunk.append(para)
+                current_len += para_len
+        if current_chunk:
+            chunks.append("\n".join(current_chunk))
+
+        # 4. 字数上限校验
+        total_words = sum(len(c) for c in chunks)
+        if total_words > max_total_words:
+            raise ValueError(
+                f"素材字数 {total_words} 超过上限 {max_total_words}"
+            )
+
+        # 5. 创建 source + chunks
+        source = MaterialSource(
+            novel_id=novel_id,
+            raw_text=raw_text,
+            content_digest=digest,
+            status="pending",
+            word_count=total_words,
+        )
+        await self.material_sources.save(source)
+
+        for i, chunk_text in enumerate(chunks):
+            chunk = MaterialChunk(
+                source_id=source.id,
+                chunk_index=i,
+                content=chunk_text,
+                content_digest=compute_content_digest(chunk_text),
+                status="pending",
+            )
+            await self.material_chunks.save(chunk)
+
+        return source
+
+    # ═══════════════════════════════════════════════════
+    #  T7: 拆解提交
+    # ═══════════════════════════════════════════════════
+
+    async def t7_submit_decompose(
+        self,
+        chunk_id: UUID,
+        fragments: list[MaterialFragment],
+        chunk_status: str = "done",
+        error_message: str | None = None,
+        chunk_retry_count: int | None = None,
+    ) -> None:
+        """T7: 提交拆解结果。
+
+        1. 清除该 chunk 旧的非 user_edited 片段
+        2. 批量插入新 fragments
+        3. 标记 chunk done/failed/low_quality
+
+        Args:
+            chunk_id: 拆解块 ID
+            fragments: LLM 产出片段列表
+            chunk_status: chunk 新状态（done/failed/low_quality）
+            error_message: 错误消息（失败时）
+            chunk_retry_count: 更新重试次数（None 则不变）
+        """
+        # 1. 清除旧的非 user_edited 片段
+        await self.material_fragments.delete_by_chunk_except_edited(chunk_id)
+
+        # 2. 批量插入新片段
+        if fragments:
+            await self.material_fragments.batch_save(fragments)
+
+        # 3. 更新 chunk 状态
+        chunk = await self.material_chunks.get_by_id(chunk_id)
+        if chunk is not None:
+            chunk.status = chunk_status
+            if error_message is not None:
+                chunk.error_message = error_message
+            if chunk_retry_count is not None:
+                chunk.retry_count = chunk_retry_count
+            await self.material_chunks.save(chunk)
+
+    # ═══════════════════════════════════════════════════
+    #  T11: 保存设置
+    # ═══════════════════════════════════════════════════
+
+    async def t11_settings_save(self, settings_json: dict) -> None:
+        """T11: 保存 app_settings 配置。
+
+        Args:
+            settings_json: 完整 LLMConfig 序列化 dict
+        """
+        await self.app_settings.upsert(settings_json)
+
+    # ═══════════════════════════════════════════════════
+    #  T8: Run 启动
+    # ═══════════════════════════════════════════════════
+
+    async def t8_run_start(
+        self,
+        novel_id: UUID,
+        kind: RunKind,
+        chapter_id: UUID | None = None,
+    ) -> UUID:
+        """T8: 启动一段 Run 执行生命周期。
+
+        Args:
+            novel_id: 小说 ID
+            kind: Run 类型（generate/revise/finalize/plan）
+            chapter_id: 关联章节 ID（kind=plan 时 None）
+
+        Returns:
+            run_id: 新创建的 Run UUID
+
+        Raises:
+            ValueError: 同章有 running 状态的 run 时 409
+        """
+        # 校验同章无 running run
+        if chapter_id is not None:
+            existing = await self.runs.get_running_for_chapter(chapter_id)
+            if existing is not None:
+                raise ValueError(
+                    f"章节 {chapter_id} 已有正在执行的 Run ({existing.id})"
+                )
+
+        now = datetime.now(timezone.utc)
+        run = Run(
+            novel_id=novel_id,
+            chapter_id=chapter_id,
+            kind=kind,
+            status=RunStatus.RUNNING,
+            phase="",
+            partial_content="",
+            started_at=now,
+        )
+        await self.runs.save(run)
+        return run.id
+
+    # ═══════════════════════════════════════════════════
+    #  T9: 落稿收口
+    # ═══════════════════════════════════════════════════
+
+    async def t9_finalize_draft(
+        self,
+        run_id: UUID,
+        chapter_content: str,
+        chapter_title: str,
+    ) -> UUID:
+        """T9: 落稿收口 — 内嵌 T1 写 Chapter + 归档旧版本。
+
+        Args:
+            run_id: Run UUID
+            chapter_content: 最终定稿内容
+            chapter_title: 章节标题
+
+        Returns:
+            chapter_id: 写入的 Chapter UUID
+        """
+        run = await self.runs.get_by_id(run_id)
+        if run is None:
+            raise ValueError(f"Run {run_id} 不存在")
+        if run.chapter_id is None:
+            raise ValueError(f"Run {run_id} 无关联章节")
+
+        chapter = await self.chapters.get_by_id(run.chapter_id)
+        if chapter is None:
+            raise ValueError(f"章节 {run.chapter_id} 不存在")
+
+        # 归档旧版本（如果有）
+        previous_version = ChapterVersion(
+            chapter_id=chapter.id,
+            novel_id=chapter.novel_id,
+            version=chapter.version,
+            index=chapter.index,
+            title=chapter.title,
+            content=chapter.content,
+            summary=chapter.summary,
+        ) if chapter.content else None
+
+        # 更新章节内容
+        chapter.content = chapter_content
+        chapter.title = chapter_title
+        chapter.status = ChapterStatus.APPROVED
+        chapter.version += 1
+
+        # 内嵌 T1 写 Chapter
+        await self.chapters.save(chapter)
+        if previous_version:
+            await self.chapters.save_version(previous_version)
+
+        # 清空 partial_content
+        run.partial_content = ""
+        await self.runs.save(run)
+
+        return chapter.id
+
+    # ═══════════════════════════════════════════════════
+    #  T10: Run 终态收口
+    # ═══════════════════════════════════════════════════
+
+    async def t10_run_finalize(
+        self,
+        run_id: UUID,
+        new_status: RunStatus,
+        llm_stats: dict | None = None,
+    ) -> None:
+        """T10: Run 终态收口 — 写 stats 快照、标记 completed_at。
+
+        Args:
+            run_id: Run UUID
+            new_status: 终态（awaiting_human/completed/failed/cancelled/interrupted）
+            llm_stats: 聚合 LLM 统计快照
+        """
+        run = await self.runs.get_by_id(run_id)
+        if run is None:
+            raise ValueError(f"Run {run_id} 不存在")
+
+        if new_status in (
+            RunStatus.COMPLETED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+            RunStatus.INTERRUPTED,
+        ):
+            run.completed_at = datetime.now(timezone.utc)
+
+        if new_status == RunStatus.AWAITING_HUMAN:
+            run.mark_awaiting_human()
+        else:
+            run.status = new_status
+
+        run.updated_at = datetime.now(timezone.utc)
+        if llm_stats:
+            run.llm_stats = llm_stats
+
+        await self.runs.save(run)
 
     # ═══════════════════════════════════════════════════
     #  通用

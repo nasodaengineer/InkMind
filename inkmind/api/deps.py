@@ -32,3 +32,12 @@ def get_novel_repo(session: AsyncSession = Depends(get_db)) -> NovelRepository:
 
 def get_chapter_repo(session: AsyncSession = Depends(get_db)) -> ChapterRepository:
     return ChapterRepository(session)
+
+
+async def get_uow(
+    session: AsyncSession = Depends(get_db),
+) -> UnitOfWork:
+    """FastAPI 依赖注入：获取 UnitOfWork 实例。"""
+    from inkmind.storage.unit_of_work import UnitOfWork as _UnitOfWork
+
+    return _UnitOfWork(session)

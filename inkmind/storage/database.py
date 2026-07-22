@@ -9,7 +9,9 @@ import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator, AsyncIterator
+from uuid import uuid4
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -72,11 +74,84 @@ class DatabaseManager:
         """创建所有 ORM 表。"""
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
+        await self._migrate_schema()
 
     async def drop_tables(self) -> None:
         """删除所有 ORM 表（测试用）。"""
         async with self._engine.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
+
+    async def _migrate_schema(self) -> None:
+        """既有库迁移：加列、建表、回填旧章节到默认卷。
+
+        Issue #35: 检测 chapters 无 volume_id 列则 ALTER TABLE 加列；
+        volumes / outline_spines 表由 create_tables 自动创建；
+        创建默认卷回填所有旧章节的 volume_id。
+        """
+        async with self._engine.begin() as conn:
+            # 1. 检测并添加 chapters 新列
+            cols_result = await conn.execute(
+                text("PRAGMA table_info('chapters')")
+            )
+            existing_cols = {row[1] for row in cols_result.fetchall()}
+
+            new_cols: dict[str, str] = {
+                "volume_id": "VARCHAR(36) REFERENCES volumes(uuid)",
+                "rhythm_marker": "VARCHAR(20)",
+                "pov": "VARCHAR(50) NOT NULL DEFAULT ''",
+                "involved": "JSON NOT NULL DEFAULT '[]'",
+            }
+            for col_name, col_def in new_cols.items():
+                if col_name not in existing_cols:
+                    await conn.execute(
+                        text(f"ALTER TABLE chapters ADD COLUMN {col_name} {col_def}")
+                    )
+
+            # 2. 回填旧章节到默认卷（仅对 volume_id IS NULL 且有关联 novel 的章节）
+            tbl_exists = await conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' AND name='volumes'")
+            )
+            if not tbl_exists.scalar():
+                return
+
+            novels_result = await conn.execute(
+                text(
+                    "SELECT DISTINCT novel_id FROM chapters "
+                    "WHERE volume_id IS NULL AND novel_id IS NOT NULL AND novel_id != ''"
+                )
+            )
+            for (nid,) in novels_result.fetchall():
+                # 找该小说的第一卷
+                v_result = await conn.execute(
+                    text(
+                        "SELECT uuid FROM volumes WHERE novel_id = :nid ORDER BY volume_index LIMIT 1"
+                    ),
+                    {"nid": nid},
+                )
+                vol_row = v_result.scalar_one_or_none()
+                if not vol_row:
+                    vol_uuid = str(uuid4())
+                    await conn.execute(
+                        text(
+                            "INSERT INTO volumes (uuid, novel_id, volume_index, title, planned_size) "
+                            "VALUES (:uuid, :nid, 1, '默认卷', 100)"
+                        ),
+                        {"uuid": vol_uuid, "nid": nid},
+                    )
+                else:
+                    vol_uuid = vol_row
+
+                await conn.execute(
+                    text(
+                        "UPDATE chapters SET volume_id = :vid "
+                        "WHERE novel_id = :nid AND volume_id IS NULL"
+                    ),
+                    {"vid": vol_uuid, "nid": nid},
+                )
+
+    async def migrate(self) -> None:
+        """外部显式调用迁移入口。"""
+        await self._migrate_schema()
 
     @asynccontextmanager
     async def session(self) -> AsyncIterator[AsyncSession]:

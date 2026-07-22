@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import AsyncGenerator, Dict, List, Optional
 
 from inkmind.llm.providers.base import LLMResponse, ProviderStats, aggregate_snapshots
 
@@ -80,6 +80,46 @@ class ScriptedLLMClient:
             provider="scripted",
             finish_reason="stop",
             usage=None,
+        )
+
+    async def chat_stream(
+        self,
+        agent_role: str,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        **kwargs,
+    ) -> AsyncGenerator[str, None]:
+        """模拟流式响应 — 以 token 分片产出确定性内容。"""
+        self.calls.append(
+            {
+                "agent_role": agent_role,
+                "prompt": prompt,
+                "system_prompt": system_prompt,
+            }
+        )
+        self._call_counts[agent_role] = self._call_counts.get(agent_role, 0) + 1
+        content = self._next_content(agent_role, prompt)
+
+        # 分片产出：每次 5-15 个字符
+        chunk_size = 10
+        for i in range(0, len(content), chunk_size):
+            yield content[i : i + chunk_size]
+
+        self.record_stats(
+            ProviderStats(
+                provider_name="scripted",
+                model_name="scripted-fake",
+                latency_ms=0.0,
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+                estimated_cost=0.0,
+                success=True,
+                error_type=None,
+                degraded=False,
+                retry_count=0,
+                timestamp=datetime.now(timezone.utc),
+            )
         )
 
     def get_stats(self) -> dict:

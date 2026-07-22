@@ -12,6 +12,7 @@ MemoryKeeperCore 的运行时状态。
   6. 加载所有 PENDING/RUNNING 的 CompressionTask → 重新推入异步队列
   7. 加载 PipelineState（所有章节状态映射）
   8. 恢复完成
+  9. 检测所有 status=running 的 Run → 标记 interrupted
 """
 
 from __future__ import annotations
@@ -117,6 +118,13 @@ class RecoveryManager:
         # Step 6.5: 重置 PENDING/RUNNING 任务为 PENDING（重启后重新调度）
         await self._reset_pending_tasks(novel_id_str)
 
+        # Step 9: 中断所有 running 的 Run
+        interrupted_count = await self.step9_interrupt_running_runs()
+        if interrupted_count > 0:
+            print(
+                f"[Recovery] Step 9: {interrupted_count} 个 Run 已标记为 interrupted"
+            )
+
         return state
 
     async def _load_archives(
@@ -180,3 +188,29 @@ class RecoveryManager:
         if model is None:
             return None
         return dict_to_pipeline_state(pipeline_state_to_dict(model))
+
+    # ═══════════════════════════════════════════════════════
+    #  Step 9: 中断所有 running 的 Run
+    # ═══════════════════════════════════════════════════════
+
+    async def step9_interrupt_running_runs(self) -> int:
+        """检测所有 status=running 的 Run，标记为 interrupted。
+
+        Returns:
+            被中断的 Run 数量
+        """
+        from datetime import datetime, timezone
+
+        from inkmind.storage.models import RunsModel
+
+        result = await self._session.execute(
+            select(RunsModel).where(RunsModel.status == "running")
+        )
+        running_runs = list(result.scalars().all())
+
+        now = datetime.now(timezone.utc)
+        for run in running_runs:
+            run.status = "interrupted"
+            run.completed_at = now
+
+        return len(running_runs)
