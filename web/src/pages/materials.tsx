@@ -14,6 +14,7 @@ import {
   Edit3,
   RotateCcw,
   FileText,
+  Search,
 } from "lucide-react"
 import { api, FRAGMENT_TYPES, type MaterialSource, type MaterialChunk, type MaterialFragment } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -58,7 +59,7 @@ const SUGGESTED_TAGS = [
 
 export default function MaterialsPage() {
   const [activeNovelId, setActiveNovelId] = useState<string>("")
-  const [view, setView] = useState<"ledger" | "import" | "preview">("ledger")
+  const [view, setView] = useState<"ledger" | "import" | "preview" | "search">("ledger")
   const [selectedSourceId, setSelectedSourceId] = useState<string | null>(null)
 
   // 查询小说列表以获取当前选定小说
@@ -123,6 +124,17 @@ export default function MaterialsPage() {
           >
             预览提交
           </button>
+          <button
+            onClick={() => setView("search")}
+            className={cn(
+              "px-3 py-1.5 text-sm rounded-md transition-colors",
+              view === "search"
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:text-foreground",
+            )}
+          >
+            搜索
+          </button>
         </div>
       </div>
 
@@ -148,6 +160,10 @@ export default function MaterialsPage() {
           novelId={activeNovelId}
           sourceId={selectedSourceId}
         />
+      )}
+
+      {view === "search" && (
+        <SearchView novelId={activeNovelId} />
       )}
     </div>
   )
@@ -1124,5 +1140,259 @@ function NewFragmentForm({
         </button>
       </div>
     </form>
+  )
+}
+
+// ── Issue #44: 素材搜索视图 ──
+
+function SearchView({ novelId }: { novelId: string }) {
+  const [query, setQuery] = useState("")
+  const [debouncedQuery, setDebouncedQuery] = useState("")
+  const [selectedTypes, setSelectedTypes] = useState<string[]>([])
+  const [selectedTag, setSelectedTag] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [tagInput, setTagInput] = useState("")
+  const [tagSuggestions, setTagSuggestions] = useState<{ tag: string; count: number }[]>([])
+  const [showTagDropdown, setShowTagDropdown] = useState(false)
+
+  // 防抖：500ms 后触发搜索
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 500)
+    return () => clearTimeout(timer)
+  }, [query])
+
+  // 加载标签建议
+  useEffect(() => {
+    if (tagInput.length > 0) {
+      api.materials.tagAutocomplete(novelId, tagInput).then(setTagSuggestions).catch(() => {})
+    } else {
+      api.materials.tagAutocomplete(novelId).then(setTagSuggestions).catch(() => {})
+    }
+  }, [novelId, tagInput])
+
+  // 搜索查询
+  const { data, isLoading } = useQuery({
+    queryKey: ["materialSearch", novelId, debouncedQuery, selectedTypes, selectedTag, page],
+    queryFn: () =>
+      api.materials.searchFragments(novelId, {
+        q: debouncedQuery || undefined,
+        type: selectedTypes.length === 1 ? selectedTypes[0] : undefined,
+        tag: selectedTag || undefined,
+        page,
+        per_page: 20,
+      }),
+  })
+
+  const totalPages = data ? Math.ceil(data.total / data.per_page) : 0
+
+  const toggleType = (t: string) => {
+    setSelectedTypes((prev) =>
+      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t],
+    )
+    setPage(1)
+  }
+
+  const handleTagSelect = (tag: string) => {
+    setSelectedTag(selectedTag === tag ? null : tag)
+    setShowTagDropdown(false)
+    setTagInput("")
+    setPage(1)
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* 搜索栏 */}
+      <div className="flex gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+          <input
+            value={query}
+            onChange={(e) => { setQuery(e.target.value); setPage(1) }}
+            placeholder="搜索片段内容（关键词空格分词 AND）"
+            className="w-full pl-9 pr-3 py-2 rounded-md border border-input bg-background text-sm"
+          />
+        </div>
+      </div>
+
+      {/* 类型多选 chip */}
+      <div className="flex flex-wrap gap-1.5">
+        {FRAGMENT_TYPES.map((t) => (
+          <button
+            key={t}
+            onClick={() => toggleType(t)}
+            className={cn(
+              "px-2 py-1 rounded-full text-xs font-medium transition-colors",
+              selectedTypes.includes(t)
+                ? "bg-primary text-primary-foreground"
+                : "bg-muted text-muted-foreground hover:bg-accent",
+            )}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {/* 标签 chip + 自动补全 */}
+      <div className="relative">
+        <div className="flex flex-wrap gap-1.5 items-center">
+          {selectedTag && (
+            <span className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-primary/20 text-primary">
+              #{selectedTag}
+              <button onClick={() => setSelectedTag(null)} className="hover:text-red-500">&times;</button>
+            </span>
+          )}
+          <div className="relative">
+            <input
+              value={tagInput}
+              onChange={(e) => setTagInput(e.target.value)}
+              onFocus={() => setShowTagDropdown(true)}
+              onBlur={() => setTimeout(() => setShowTagDropdown(false), 200)}
+              placeholder={selectedTag ? "切换标签..." : "筛选标签..."}
+              className="px-2 py-1 rounded-md border border-input bg-background text-xs w-32"
+            />
+            {showTagDropdown && tagSuggestions.length > 0 && (
+              <div className="absolute z-10 mt-1 left-0 w-48 max-h-48 overflow-y-auto rounded-md border bg-popover shadow-md">
+                {tagSuggestions.map((s) => (
+                  <button
+                    key={s.tag}
+                    type="button"
+                    onMouseDown={() => handleTagSelect(s.tag)}
+                    className={cn(
+                      "block w-full text-left px-2 py-1.5 text-xs hover:bg-accent",
+                      selectedTag === s.tag && "bg-accent font-medium",
+                    )}
+                  >
+                    <span>{s.tag}</span>
+                    <span className="text-muted-foreground ml-2">({s.count})</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          {selectedTag && (
+            <button
+              onClick={() => { setSelectedTag(null); setTagInput("") }}
+              className="text-xs text-muted-foreground hover:text-foreground"
+            >
+              清除
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* 搜索结果 */}
+      {isLoading ? (
+        <div className="flex justify-center py-12">
+          <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : data && data.items.length > 0 ? (
+        <>
+          <div className="text-xs text-muted-foreground">
+            共 {data.total} 条结果
+          </div>
+          <div className="space-y-2">
+            {data.items.map((fragment) => (
+              <SearchResultCard key={fragment.id} fragment={fragment} />
+            ))}
+          </div>
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 pt-2">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="px-3 py-1 text-xs rounded-md border disabled:opacity-30 hover:bg-accent"
+              >
+                上一页
+              </button>
+              <span className="text-xs text-muted-foreground">
+                {page} / {totalPages}
+              </span>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                className="px-3 py-1 text-xs rounded-md border disabled:opacity-30 hover:bg-accent"
+              >
+                下一页
+              </button>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="flex flex-col items-center justify-center py-20 text-muted-foreground">
+          <Search className="w-12 h-12 mb-4 opacity-30" />
+          <p>{debouncedQuery || selectedTypes.length > 0 || selectedTag ? "未找到匹配片段" : "输入关键词开始搜索"}</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function SearchResultCard({ fragment }: { fragment: MaterialFragment }) {
+  const [expanded, setExpanded] = useState(false)
+
+  return (
+    <div
+      className={cn(
+        "border rounded-lg transition-colors cursor-pointer",
+        expanded ? "border-primary/50" : "bg-card hover:bg-accent/30",
+      )}
+      onClick={() => setExpanded(!expanded)}
+    >
+      <div className="p-3">
+        <div className="flex items-start gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-sm truncate">{fragment.title}</span>
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                {fragment.type}
+              </span>
+              {fragment.user_edited && (
+                <span className="text-[10px] text-blue-500">已编辑</span>
+              )}
+            </div>
+            <p className="text-sm text-muted-foreground mt-1 line-clamp-2">{fragment.content}</p>
+            {fragment.tags.length > 0 && (
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {fragment.tags.slice(0, 5).map((tag) => (
+                  <span
+                    key={tag}
+                    className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] bg-muted text-muted-foreground"
+                  >
+                    {tag}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* 展开后查看更多字段 */}
+        {expanded && (
+          <div className="mt-3 pt-3 border-t space-y-2">
+            {fragment.source_quote && (
+              <div>
+                <span className="text-xs font-medium text-muted-foreground">原文引用</span>
+                <p className="text-xs text-muted-foreground/80 mt-0.5 border-l-2 pl-2 italic">
+                  "{fragment.source_quote}"
+                </p>
+              </div>
+            )}
+            {fragment.reusability_note && (
+              <div>
+                <span className="text-xs font-medium text-muted-foreground">复用说明</span>
+                <p className="text-xs text-muted-foreground/80 mt-0.5">{fragment.reusability_note}</p>
+              </div>
+            )}
+            {fragment.source && (
+              <div>
+                <span className="text-xs font-medium text-muted-foreground">来源</span>
+                <p className="text-xs text-muted-foreground/80 mt-0.5">{fragment.source}</p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
   )
 }

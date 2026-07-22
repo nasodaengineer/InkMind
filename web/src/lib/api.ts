@@ -383,6 +383,36 @@ export const api = {
         `/novels/${novelId}/materials/fragments`,
         { method: "POST", body: JSON.stringify(body) },
       ),
+
+    // Issue #44: 素材搜索与标签自动补全
+    searchFragments: (
+      novelId: string,
+      params?: { q?: string; type?: string; tag?: string; page?: number; per_page?: number },
+    ) => {
+      const qs = new URLSearchParams()
+      if (params?.q) qs.set("q", params.q)
+      if (params?.type) qs.set("type", params.type)
+      if (params?.tag) qs.set("tag", params.tag)
+      if (params?.page) qs.set("page", String(params.page))
+      if (params?.per_page) qs.set("per_page", String(params.per_page))
+      const q = qs.toString()
+      return request<{ items: MaterialFragment[]; total: number; page: number; per_page: number }>(
+        `/novels/${novelId}/materials/search${q ? "?" + q : ""}`,
+      )
+    },
+
+    tagAutocomplete: (novelId: string, prefix?: string) => {
+      const qs = prefix ? `?prefix=${encodeURIComponent(prefix)}` : ""
+      return request<{ tag: string; count: number }[]>(
+        `/novels/${novelId}/materials/tags${qs}`,
+      )
+    },
+
+    rebuildFts: (novelId: string) =>
+      request<{ status: string; count: number }>(
+        `/novels/${novelId}/materials/rebuild-fts`,
+        { method: "POST" },
+      ),
   },
 
   settings: {

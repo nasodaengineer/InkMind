@@ -3,7 +3,8 @@ import { useParams, useNavigate } from "react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
 import { Button } from "@/components/ui/button"
-import { Plus, Trash2 } from "lucide-react"
+import { Plus, Trash2, BookOpen } from "lucide-react"
+import MaterialDrawer from "@/components/MaterialDrawer"
 
 export default function WorkspacePage() {
   const { novelId } = useParams()
@@ -11,6 +12,7 @@ export default function WorkspacePage() {
   const queryClient = useQueryClient()
   const [title, setTitle] = useState("")
   const [showCreate, setShowCreate] = useState(false)
+  const [materialDrawerOpen, setMaterialDrawerOpen] = useState(false)
 
   const novels = useQuery({ queryKey: ["novels"], queryFn: api.novels.list })
 
@@ -129,6 +131,15 @@ export default function WorkspacePage() {
             >
               ← 所有小说
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setMaterialDrawerOpen(true)}
+              className="ml-auto"
+            >
+              <BookOpen className="w-4 h-4 mr-1" />
+              素材
+            </Button>
           </div>
           {chapters.isLoading && <p className="text-muted-foreground">加载中…</p>}
           {chapters.data?.length === 0 && (
@@ -164,6 +175,24 @@ export default function WorkspacePage() {
             ))}
           </div>
         </div>
+      )}
+
+      {/* 写作台素材旁路抽屉 */}
+      {novelId && (
+        <MaterialDrawer
+          novelId={novelId}
+          open={materialDrawerOpen}
+          onClose={() => setMaterialDrawerOpen(false)}
+          onInsert={(content) => {
+            // 将素材内容插入编辑器（当前用 alert 占位，后续接编辑器 API）
+            navigator.clipboard?.writeText(content).then(() => {
+              alert("素材内容已复制到剪贴板，请粘贴到编辑器中。\n\n后续版本将直接插入光标位置。")
+            }).catch(() => {
+              alert("素材内容：\n\n" + content)
+            })
+            setMaterialDrawerOpen(false)
+          }}
+        />
       )}
     </div>
   )

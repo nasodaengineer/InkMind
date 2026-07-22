@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from inkmind.api.deps import get_db
+from inkmind.storage.search import FTSManager
 from inkmind.models.materials import (
     FRAGMENT_TYPES,
     MaterialChunk,
@@ -339,6 +340,14 @@ async def start_decompose(
     await repo_s.save(source)
     await session.commit()
 
+    # 拆解完成后重建 FTS 索引
+    try:
+        from inkmind.storage.search import FTSManager
+        fts_mgr = FTSManager(session)
+        await fts_mgr.rebuild()
+    except Exception:
+        pass
+
     return {
         "status": "done",
         "source_id": str(source_id),
@@ -450,6 +459,21 @@ async def update_fragment(
     await repo_f.save(fragment)
     await session.commit()
 
+    # 同步 FTS 索引
+    mgr = FTSManager(session)
+    await mgr.ensure_table()
+    # 获取 ORM 行 id（用于 FTS rowid）
+    from inkmind.storage.models import MaterialFragmentModel
+    from sqlalchemy import select as sql_select
+    result = await session.execute(
+        sql_select(MaterialFragmentModel.id).where(
+            MaterialFragmentModel.uuid == str(fragment.id)
+        )
+    )
+    row_id = result.scalar_one_or_none()
+    if row_id:
+        await mgr.sync_fragment(row_id, fragment.title, fragment.content)
+
     return _fragment_to_response(fragment)
 
 
@@ -472,6 +496,15 @@ async def delete_fragment(
             detail="Cannot delete user_edited fragment",
         )
     await session.commit()
+
+    # 同步 FTS 索引（删除）
+    mgr = FTSManager(session)
+    await mgr.ensure_table()
+    # 已删除无法获取 row id，重建兜底
+    try:
+        await mgr.rebuild()
+    except Exception:
+        pass
 
 
 @router.post("/fragments", status_code=status.HTTP_201_CREATED)
@@ -530,6 +563,20 @@ async def create_fragment(
     await repo_f.save(fragment)
     await session.commit()
 
+    # 同步 FTS 索引
+    mgr = FTSManager(session)
+    await mgr.ensure_table()
+    from inkmind.storage.models import MaterialFragmentModel
+    from sqlalchemy import select as sql_select
+    result = await session.execute(
+        sql_select(MaterialFragmentModel.id).where(
+            MaterialFragmentModel.uuid == str(fragment.id)
+        )
+    )
+    row_id = result.scalar_one_or_none()
+    if row_id:
+        await mgr.sync_fragment(row_id, fragment.title, fragment.content)
+
     return _fragment_to_response(fragment)
 
 
@@ -563,3 +610,100 @@ async def rerun_failed_chunks(
         "rerun_count": now_pending,
         "message": f"{now_pending} 个失败块已重置为待处理",
     }
+
+
+# ═══════════════════════════════════════════════════════
+#  Issue #44: 素材搜索与标签自动补全
+# ═══════════════════════════════════════════════════════
+
+
+class SearchResultItem(BaseModel):
+    """搜索结果项。"""
+    id: str
+    title: str
+    content: str
+    type: str
+    tags: list[str]
+    source: str
+    source_quote: str | None = None
+    reusability_note: str = ""
+    user_note: str = ""
+    user_edited: bool = False
+    created_at: str
+    source_id: str
+    source_chunk_id: str
+
+
+class SearchResponse(BaseModel):
+    items: list[SearchResultItem]
+    total: int
+    page: int
+    per_page: int
+
+
+class TagSuggestion(BaseModel):
+    tag: str
+    count: int
+
+
+@router.get("/search")
+async def search_fragments(
+    novel_id: UUID,
+    q: str | None = Query(None, description="搜索关键词（空格分词 AND）"),
+    type_filter: str | None = Query(None, alias="type", description="片段类型筛选"),
+    tag_filter: str | None = Query(None, alias="tag", description="标签筛选"),
+    page: int = Query(1, ge=1, description="页码"),
+    per_page: int = Query(20, ge=1, le=100, description="每页条数"),
+    session: AsyncSession = Depends(get_db),
+) -> SearchResponse:
+    """全文搜索素材片段。
+
+    支持：
+    - 关键词空格分词 AND 搜索
+    - < 3 字符自动降级 LIKE
+    - 类型多选 chip + 标签 chip 组合筛选
+    - 分页
+    """
+    mgr = FTSManager(session)
+    await mgr.ensure_table()
+    result = await mgr.search(
+        novel_id=novel_id,
+        query=q,
+        type_filter=type_filter,
+        tag_filter=tag_filter,
+        page=page,
+        per_page=per_page,
+    )
+    return SearchResponse(
+        items=[SearchResultItem(**item) for item in result["items"]],
+        total=result["total"],
+        page=result.get("page", page),
+        per_page=result.get("per_page", per_page),
+    )
+
+
+@router.get("/tags")
+async def get_tag_suggestions(
+    novel_id: UUID,
+    prefix: str | None = Query(None, description="输入前缀"),
+    session: AsyncSession = Depends(get_db),
+) -> list[TagSuggestion]:
+    """标签自动补全。
+
+    返回 Top 50 复用 + 3-6 条前缀建议。
+    """
+    mgr = FTSManager(session)
+    await mgr.ensure_table()
+    results = await mgr.tag_autocomplete(novel_id=novel_id, prefix=prefix)
+    return [TagSuggestion(**r) for r in results]
+
+
+@router.post("/rebuild-fts")
+async def rebuild_fts(
+    novel_id: UUID,
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    """全量重建 FTS 索引（兜底用）。"""
+    mgr = FTSManager(session)
+    result = await mgr.rebuild()
+    return result
