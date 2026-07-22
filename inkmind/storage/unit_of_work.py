@@ -24,6 +24,7 @@ from inkmind.storage.concurrency import FileLock
 
 from inkmind.models.agent import ChapterStatus, PipelineState
 from inkmind.models.chapter import Chapter, ChapterVersion
+from inkmind.models.novel import OutlineSpine
 from inkmind.models.run import Run, RunKind, RunStatus
 from inkmind.storage.idempotency import (
     IdempotencyGuard,
@@ -185,6 +186,172 @@ class UnitOfWork:
 
         # 2. 更新 PipelineState
         await self.pipelines.save(pipeline_state)
+
+    # ═══════════════════════════════════════════════════
+    #  T2a: Planner 保存总纲（覆盖保护）
+    # ═══════════════════════════════════════════════════
+
+    async def t2_planner_save_spine(
+        self,
+        novel_id: UUID,
+        spine: OutlineSpine,
+        confirm_overwrite: bool = False,
+    ) -> tuple[bool, OutlineSpine]:
+        """T2a: Planner 保存总纲 — 覆盖保护。
+
+        如果已有非空总纲且未确认覆盖，返回 (False, 现有总纲)。
+
+        Args:
+            novel_id: 小说 ID
+            spine: 新总纲
+            confirm_overwrite: 确认覆盖非空内容
+
+        Returns:
+            (是否已写入, 写入/现有的总纲)
+
+        Raises:
+            ValueError: 非空总纲未确认覆盖时抛出
+        """
+        existing = await self.spines.get_by_novel(novel_id)
+
+        if existing is not None:
+            # 检查是否有非空字段
+            has_content = any(
+                [
+                    existing.main_line,
+                    existing.core_conflict,
+                    existing.ending,
+                    existing.selling_points,
+                    existing.world_background,
+                    existing.golden_finger,
+                ]
+            )
+            if has_content and not confirm_overwrite:
+                raise ValueError(
+                    "总纲非空，需确认覆盖（confirm_overwrite=True）。"
+                    "如确认覆盖，请重新提交并设置 confirm_overwrite=true。"
+                )
+
+        # 写入新总纲
+        result = await self.spines.upsert(spine)
+        return True, result
+
+    # ═══════════════════════════════════════════════════
+    #  T2b: Planner 批量创建卷（拆卷）
+    # ═══════════════════════════════════════════════════
+
+    async def t2_planner_batch_create_volumes(
+        self,
+        novel_id: UUID,
+        volumes_data: list[dict],
+        start_index: int = 1,
+    ) -> list[Volume]:
+        """T2b: Planner 批量创建卷。
+
+        Args:
+            novel_id: 小说 ID
+            volumes_data: LLM 返回的卷数据列表（title/stage_goal/main_line/side_line/volume_cliffhanger/planned_size）
+            start_index: 起始卷序号（默认 1）
+
+        Returns:
+            创建的 Volume 列表
+        """
+        from inkmind.models.novel import Volume
+
+        created: list[Volume] = []
+        for i, vd in enumerate(volumes_data):
+            vol = Volume(
+                novel_id=novel_id,
+                volume_index=start_index + i,
+                title=vd.get("title", f"第 {start_index + i} 卷"),
+                stage_goal=vd.get("stage_goal", ""),
+                main_line=vd.get("main_line", ""),
+                side_line=vd.get("side_line", ""),
+                volume_cliffhanger=vd.get("volume_cliffhanger", ""),
+                planned_size=vd.get("planned_size", 10),
+            )
+            await self.volumes.save(vol)
+            created.append(vol)
+
+        return created
+
+    # ═══════════════════════════════════════════════════
+    #  T2c: Planner 规划章（覆盖保护 — 已定稿/开工锁定）
+    # ═══════════════════════════════════════════════════
+
+    async def t2_planner_plan_chapters(
+        self,
+        novel_id: UUID,
+        chapters_data: list[dict],
+        volume_id: UUID | None = None,
+    ) -> list[Chapter]:
+        """T2c: Planner 批量创建/覆盖章节大纲。
+
+        仅 PLANNED 状态的章节可覆盖；已定稿（approved/finalized）或
+        开工（writing/draft_ready/reviewing/revising）的章节锁定不覆盖。
+
+        Args:
+            novel_id: 小说 ID
+            chapters_data: LLM 返回的章节数据列表（含 chapter_index/title/summary/key_events/rhythm_marker/pov/involved）
+            volume_id: 所属卷 ID
+
+        Returns:
+            实际写入的 Chapter 列表
+        """
+        chapters_created: list[Chapter] = []
+
+        for ch_data in chapters_data:
+            idx = ch_data.get("chapter_index")
+            if idx is None:
+                continue
+
+            # 检查是否存在已有章节
+            existing = await self.chapters.get_by_novel_and_index(novel_id, idx)
+
+            if existing is not None:
+                # 锁定检查：已定稿/开工的章不可覆盖
+                locked_statuses = [
+                    ChapterStatus.APPROVED,
+                    ChapterStatus.FINALIZED,
+                    ChapterStatus.WRITING,
+                    ChapterStatus.DRAFT_READY,
+                    ChapterStatus.REVIEWING,
+                    ChapterStatus.REVISING,
+                ]
+                if existing.status in locked_statuses:
+                    # 跳过不覆盖
+                    continue
+
+                # 仅 PLANNED 状态可覆盖 — 更新字段
+                existing.title = ch_data.get("title", existing.title)
+                existing.summary = ch_data.get("summary", existing.summary)
+                existing.key_events = ch_data.get("key_events", existing.key_events)
+                existing.rhythm_marker = ch_data.get("rhythm_marker", existing.rhythm_marker)
+                existing.pov = ch_data.get("pov", existing.pov)
+                existing.involved = ch_data.get("involved", existing.involved)
+                if volume_id is not None:
+                    existing.volume_id = volume_id
+                existing.status = ChapterStatus.PLANNED
+                await self.chapters.save(existing)
+                chapters_created.append(existing)
+            else:
+                # 新建章节
+                ch = Chapter(
+                    novel_id=novel_id,
+                    index=idx,
+                    title=ch_data.get("title", f"第 {idx} 章"),
+                    summary=ch_data.get("summary", ""),
+                    key_events=ch_data.get("key_events", []),
+                    status=ChapterStatus.PLANNED,
+                    rhythm_marker=ch_data.get("rhythm_marker"),
+                    pov=ch_data.get("pov", ""),
+                    involved=ch_data.get("involved", []),
+                    volume_id=volume_id,
+                )
+                await self.chapters.save(ch)
+                chapters_created.append(ch)
+
+        return chapters_created
 
     # ═══════════════════════════════════════════════════
     #  T3: Editor 完成评审

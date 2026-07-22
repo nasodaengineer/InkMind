@@ -129,6 +129,22 @@ class ChapterOutline(ChapterIndex):
 # ── 规划阶段 ──
 
 
+class PlanLevel(str, Enum):
+    """规划操作的粒度级别。"""
+
+    SPINE = "spine"
+    """总纲（书脊）起草 — LLM 生成六字段总纲。"""
+
+    VOLUME = "volume"
+    """单卷填补 — LLM 补全单卷四字段（保已有字段）。"""
+
+    CHAPTER = "chapter"
+    """卷内批量排章 — 5-50 章大纲落指定卷区间。"""
+
+    SPLIT_VOLUMES = "split_volumes"
+    """全书拆卷 — 批量生成 2-20 卷的卷纲。"""
+
+
 class PlanRequestPayload(BaseModel):
     """请求 Planner 规划多章大纲。"""
 
@@ -136,8 +152,34 @@ class PlanRequestPayload(BaseModel):
     chapter_count: int = Field(ge=1, le=50, default=10, description="待规划的章节数")
     world_id: UUID
     context_summary: str = Field(
-        ..., description="压缩后的上下文摘要，供 Planner 保持连贯性"
+        default="", description="压缩后的上下文摘要，供 Planner 保持连贯性"
     )
+
+    # Issue #42: AI 大纲规划新增字段
+    level: PlanLevel = Field(
+        default=PlanLevel.CHAPTER, description="规划操作粒度"
+    )
+    """规划操作类型：spine / volume / chapter / split_volumes"""
+
+    prompt: str | None = Field(
+        default=None, description="可选的提示文本，指导 LLM 生成方向"
+    )
+    """用户可输入提示词指导 LLM 生成方向（如「偏向悬疑风格」）。"""
+
+    volume_count: int = Field(
+        default=5, ge=2, le=20, description="拆卷时生成的卷数（仅 split_volumes 时有效）"
+    )
+    """拆卷时指定的卷数量，范围 2-20。"""
+
+    confirm_overwrite: bool = Field(
+        default=False, description="确认覆盖非空内容（总纲/卷纲非空时需显式确认）"
+    )
+    """当目标内容已存在时，需显式确认覆盖。"""
+
+    volume_id: UUID | None = Field(
+        default=None, description="关联的卷 ID（仅 volume/chapter 时有效）"
+    )
+
     start_index: int = Field(default=1, description="起始章节序号")
 
 

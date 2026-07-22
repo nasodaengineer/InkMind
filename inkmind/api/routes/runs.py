@@ -1,4 +1,4 @@
-"""Run API 路由 — SSE 流、CRUD、取消。
+"""Run API 路由 — SSE 流、CRUD、取消、AI 规划。
 
 提供 Run 执行生命周期的 HTTP 接口：
 - POST   /api/novels/{novel_id}/runs           启动 run
@@ -6,6 +6,8 @@
 - GET    /api/novels/{novel_id}/runs            列 runs
 - GET    /api/novels/{novel_id}/runs/{run_id}   单 run
 - POST   /api/novels/{novel_id}/runs/{run_id}/cancel  取消
+
+Issue #42: AI 大纲规划 — 支持 planner 参数。
 """
 
 from __future__ import annotations
@@ -20,8 +22,9 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from inkmind.execution.runner import RunLoop
+from inkmind.execution.runner import PlanParams, RunLoop
 from inkmind.llm.client import build_llm_client
+from inkmind.models.agent import PlanLevel
 from inkmind.models.run import RunKind, RunStatus
 from inkmind.api.deps import get_db as get_session
 from inkmind.storage.unit_of_work import UnitOfWork
@@ -35,6 +38,26 @@ router = APIRouter(tags=["runs"])
 class StartRunRequest(BaseModel):
     kind: str = Field(description="generate / revise / finalize / plan")
     chapter_id: str | None = Field(default=None, description="关联章节 UUID")
+
+    # Issue #42: AI 大纲规划参数
+    level: str | None = Field(
+        default=None, description="规划级别: spine / volume / chapter / split_volumes"
+    )
+    prompt: str | None = Field(
+        default=None, description="可选的提示文本，指导 LLM 生成方向"
+    )
+    volume_count: int | None = Field(
+        default=None, ge=2, le=20, description="拆卷数量（仅 split_volumes）"
+    )
+    confirm_overwrite: bool = Field(
+        default=False, description="确认覆盖非空内容"
+    )
+    volume_id: str | None = Field(
+        default=None, description="关联的卷 UUID（仅 volume/chapter）"
+    )
+    chapter_count: int | None = Field(
+        default=None, ge=5, le=50, description="待规划的章节数（仅 chapter）"
+    )
 
 
 class RunResponse(BaseModel):
@@ -100,6 +123,12 @@ async def start_run(
     """启动一段 Run 执行生命周期。
 
     同章重复启动返回 409。
+
+    Issue #42: kind=plan 时支持 planner 参数（level/prompt/volume_count/confirm_overwrite/volume_id/chapter_count）。
+    前置校验：
+      - spine_required: spine/volume/split_volumes/chapter 均需总纲存在
+      - zero_volume_409: split_volumes 时零卷返回 409
+      - confirm_overwrite: spine/volume 非空时需确认覆盖
     """
     novel_uuid = UUID(novel_id)
     chapter_uuid = UUID(body.chapter_id) if body.chapter_id else None
@@ -111,6 +140,93 @@ async def start_run(
             status_code=400,
             detail=f"无效的 RunKind: {body.kind}，可选: generate/revise/finalize/plan",
         )
+
+    # ── 前置校验（仅 kind=plan） ──────────────────────
+    plan_params = PlanParams()
+    if kind == RunKind.PLAN:
+        # 解析 level
+        if body.level:
+            try:
+                plan_params.level = PlanLevel(body.level)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"无效的规划级别: {body.level}，可选: spine/volume/chapter/split_volumes",
+                )
+
+        plan_params.prompt = body.prompt
+        plan_params.confirm_overwrite = body.confirm_overwrite
+        if body.volume_count is not None:
+            plan_params.volume_count = body.volume_count
+        if body.chapter_count is not None:
+            plan_params.chapter_count = body.chapter_count
+        if body.volume_id:
+            plan_params.volume_id = UUID(body.volume_id)
+
+        # 校验 1: spine_required — 除 spine 外其他 level 均需总纲存在
+        if plan_params.level != PlanLevel.SPINE:
+            existing_spine = await uow.spines.get_by_novel(novel_uuid)
+            if existing_spine is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="spine_required: 总纲不存在，请先起草总纲",
+                )
+
+        # 校验 2: zero_volume_409 — 零卷时不可拆卷（冷启动）
+        if plan_params.level == PlanLevel.SPLIT_VOLUMES:
+            existing_volumes = await uow.volumes.get_by_novel(novel_uuid)
+            if len(existing_volumes) > 0:
+                raise HTTPException(
+                    status_code=409,
+                    detail="zero_volume_409: 已有卷存在，拆卷仅支持零卷冷启动。"
+                    "如需新增卷请使用「添加卷」手动操作。",
+                )
+
+        # 校验 3: volume_id required for volume/chapter
+        if plan_params.level in (PlanLevel.VOLUME, PlanLevel.CHAPTER):
+            if plan_params.volume_id is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{plan_params.level.value} 需要 volume_id",
+                )
+
+        # 校验 4: confirm_overwrite — spine/volume 非空时需确认
+        if not plan_params.confirm_overwrite:
+            if plan_params.level == PlanLevel.SPINE:
+                existing_spine = await uow.spines.get_by_novel(novel_uuid)
+                if existing_spine is not None:
+                    has_content = any(
+                        [
+                            existing_spine.main_line,
+                            existing_spine.core_conflict,
+                            existing_spine.ending,
+                            existing_spine.selling_points,
+                            existing_spine.world_background,
+                            existing_spine.golden_finger,
+                        ]
+                    )
+                    if has_content:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="confirm_overwrite: 总纲非空，需确认覆盖（confirm_overwrite=true）",
+                        )
+
+            if plan_params.level == PlanLevel.VOLUME and plan_params.volume_id:
+                existing_vol = await uow.volumes.get_by_id(plan_params.volume_id)
+                if existing_vol is not None:
+                    has_content = any(
+                        [
+                            existing_vol.stage_goal,
+                            existing_vol.main_line,
+                            existing_vol.side_line,
+                            existing_vol.volume_cliffhanger,
+                        ]
+                    )
+                    if has_content:
+                        raise HTTPException(
+                            status_code=400,
+                            detail="confirm_overwrite: 卷纲非空，需确认覆盖（confirm_overwrite=true）",
+                        )
 
     try:
         run_id = await uow.t8_run_start(
@@ -126,6 +242,20 @@ async def start_run(
     run = await uow.runs.get_by_id(run_id)
     if run is None:
         raise HTTPException(status_code=500, detail="创建 Run 失败")
+
+    # Issue #42: 持久化 plan_params 到 run 的 llm_stats 透传
+    if kind == RunKind.PLAN:
+        run.llm_stats = run.llm_stats or {}
+        run.llm_stats["plan_params"] = {
+            "level": plan_params.level.value,
+            "prompt": plan_params.prompt,
+            "volume_count": plan_params.volume_count,
+            "confirm_overwrite": plan_params.confirm_overwrite,
+            "volume_id": str(plan_params.volume_id) if plan_params.volume_id else None,
+            "chapter_count": plan_params.chapter_count,
+        }
+        await uow.runs.save(run)
+        await uow.commit()
 
     return _run_to_response(run)
 
@@ -166,13 +296,26 @@ async def stream_run(
     if run is None:
         raise HTTPException(status_code=404, detail="Run 不存在")
 
+    # Issue #42: 读取 plan_params（存于 run 的 llm_stats 中作为透传）
+    plan_params = None
+    if run.llm_stats and "plan_params" in run.llm_stats:
+        pp = run.llm_stats["plan_params"]
+        plan_params = PlanParams(
+            level=PlanLevel(pp.get("level", "chapter")) if pp.get("level") else PlanLevel.CHAPTER,
+            prompt=pp.get("prompt"),
+            volume_count=pp.get("volume_count", 5),
+            confirm_overwrite=pp.get("confirm_overwrite", False),
+            volume_id=UUID(pp["volume_id"]) if pp.get("volume_id") else None,
+            chapter_count=pp.get("chapter_count", 10),
+        )
+
     # 非 running 状态 — 返回快照后结束
     if run.status != RunStatus.RUNNING:
         return _snapshot_sse_response(run)
 
     # running 状态 — 启动 RunLoop 并流式推送
     return _streaming_run_response(
-        session, run_uuid, novel_uuid, chapter_uuid
+        session, run_uuid, novel_uuid, chapter_uuid, plan_params
     )
 
 
@@ -204,6 +347,7 @@ def _streaming_run_response(
     run_uuid: UUID,
     novel_uuid: UUID,
     chapter_uuid: UUID | None,
+    plan_params: PlanParams | None = None,
 ) -> StreamingResponse:
     """创建流式 SSE 响应，在后台 run loop 中执行。"""
 
@@ -224,8 +368,10 @@ def _streaming_run_response(
                 yield f"event: error\ndata: {json.dumps({'message': 'Run 不存在'})}\n\n"
                 return
 
-            # 创建 RunLoop
-            loop = RunLoop.create(uow, llm, run_uuid, chapter=chapter)
+            # 创建 RunLoop（issue #42: 传递 plan_params）
+            loop = RunLoop.create(
+                uow, llm, run_uuid, chapter=chapter, plan_params=plan_params
+            )
             queue: asyncio.Queue = asyncio.Queue()
 
             def event_listener(event: str, data: Any) -> None:
@@ -266,6 +412,8 @@ def _streaming_run_response(
                         yield f"event: phase\ndata: {json.dumps(data)}\n\n"
                     elif event == "verdict":
                         yield f"event: verdict\ndata: {json.dumps(data)}\n\n"
+                    elif event == "result":
+                        yield f"event: result\ndata: {json.dumps(data)}\n\n"
                     elif event == "error":
                         yield f"event: error\ndata: {json.dumps(data)}\n\n"
                         break
