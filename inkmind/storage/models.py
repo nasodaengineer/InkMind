@@ -31,6 +31,7 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 __all__ = [
     "AgentQueueModel",
+    "AppSettingsModel",
     "ChapterModel",
     "ChapterVersionModel",
     "CharacterModel",
@@ -414,4 +415,30 @@ class ProcessedDigestModel(Base):
         DateTime,
         default=lambda: datetime.now(timezone.utc),
         server_default=func.now(),
+    )
+
+
+# ═══════════════════════════════════════════════════════
+#  11. AppSettings — 应用级全局设置（单行 JSON 存储）
+# ═══════════════════════════════════════════════════════
+
+
+class AppSettingsModel(Base):
+    __tablename__ = "app_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    novel_id: Mapped[str] = mapped_column(
+        String(36), unique=True, nullable=False, default="__app__", index=True
+    )
+    settings_json: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        onupdate=func.now(),
     )

@@ -17,6 +17,7 @@ from inkmind.models.character import Character
 from inkmind.models.novel import Novel
 from inkmind.models.world import World
 from inkmind.storage.models import (
+    AppSettingsModel,
     ChapterModel,
     ChapterVersionModel,
     CharacterModel,
@@ -275,3 +276,42 @@ class PipelineStateRepository:
             return False
         await self._session.delete(model)
         return True
+
+
+class AppSettingsRepository:
+    """应用级全局设置 Repository — 单行 JSON 存储。"""
+
+    APP_NOVEL_ID = "__app__"
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def get(self) -> dict | None:
+        """获取 app_settings 的 JSON 数据。无记录则返回 None。"""
+        result = await self._session.execute(
+            select(AppSettingsModel).where(
+                AppSettingsModel.novel_id == self.APP_NOVEL_ID
+            )
+        )
+        model = result.scalar_one_or_none()
+        if model is None:
+            return None
+        return model.settings_json
+
+    async def upsert(self, data: dict) -> None:
+        """写入 app_settings（insert or update）。"""
+        result = await self._session.execute(
+            select(AppSettingsModel).where(
+                AppSettingsModel.novel_id == self.APP_NOVEL_ID
+            )
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            existing.settings_json = data
+        else:
+            self._session.add(
+                AppSettingsModel(
+                    novel_id=self.APP_NOVEL_ID,
+                    settings_json=data,
+                )
+            )

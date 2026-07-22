@@ -100,3 +100,34 @@ class LLMConfig(BaseModel):
     router: ModelRouterConfig = Field(default_factory=ModelRouterConfig)
     retry: RetryConfig = Field(default_factory=RetryConfig)
     default_model: str = Field(default="deepseek-v4-flash", description="兜底默认模型")
+
+    def to_settings_dict(self) -> dict:
+        """将 LLMConfig 序列化为 JSON 兼容的 app_settings dict。
+
+        输出结构:
+        {providers: {...}, model_router: {bindings: [...]}, retry: {...}, default_model: str}
+        """
+        raw = self.model_dump(mode="json", exclude={"config_id"})
+        # 将 router 重命名为 model_router（前端约定）
+        raw["model_router"] = raw.pop("router")
+        return raw
+
+    @classmethod
+    def from_settings_dict(cls, data: dict) -> LLMConfig:
+        """从 app_settings dict 反序列化重建 LLMConfig。
+
+        输入结构:
+        {providers: {...}, model_router: {bindings: [...]}, retry: {...}, default_model: str}
+        """
+        d = dict(data)
+        # 将 model_router 重命名为 router（内部命名）
+        if "model_router" in d:
+            d["router"] = d.pop("model_router")
+        return cls.model_validate(d)
+
+    @classmethod
+    def load_or_default(cls, settings_dict: dict | None = None) -> LLMConfig:
+        """加载配置：传入 app_settings dict 则反序列化，否则返回代码默认。"""
+        if settings_dict:
+            return cls.from_settings_dict(settings_dict)
+        return cls()

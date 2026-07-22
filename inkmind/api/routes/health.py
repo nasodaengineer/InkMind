@@ -1,0 +1,12 @@
+"""健康检查端点。"""
+
+from __future__ import annotations
+
+from fastapi import APIRouter
+
+router = APIRouter(tags=["health"])
+
+
+@router.get("/api/health")
+async def health_check():
+    return {"status": "ok", "version": "0.1.0"}

@@ -28,6 +28,7 @@ from inkmind.storage.idempotency import (
     compute_packet_digest,
 )
 from inkmind.storage.repositories import (
+    AppSettingsRepository,
     ChapterRepository,
     CharacterRepository,
     NovelRepository,
@@ -70,6 +71,7 @@ class UnitOfWork:
         self.worlds = WorldRepository(self._session) if self._session else None
         self.pipelines = PipelineStateRepository(self._session) if self._session else None
         self.idempotency = IdempotencyGuard(self._session) if self._session else None
+        self.app_settings = AppSettingsRepository(self._session) if self._session else None
         self._lock_held = False
 
     @property
@@ -306,8 +308,16 @@ class UnitOfWork:
             )
 
     # ═══════════════════════════════════════════════════
-    #  通用
+    #  T11: 设置保存
     # ═══════════════════════════════════════════════════
+
+    async def t11_settings_save(self, settings_json: dict) -> None:
+        """T11: 保存 app_settings 配置。
+
+        Args:
+            settings_json: 完整 LLMConfig 序列化 dict
+        """
+        await self.app_settings.upsert(settings_json)
 
     async def create_compression_task(
         self,
