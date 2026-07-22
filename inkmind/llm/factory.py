@@ -151,7 +151,7 @@ class ModelRouter:
             try:
                 return await provider.chat(
                     prompt, model=model, system_prompt=system_prompt,
-                    degraded=idx > 0, **kwargs,
+                    degraded=idx > 0, agent_name=agent_role, **kwargs,
                 )
             except Exception as e:
                 provider.stats.fallback_used += 1
@@ -177,7 +177,7 @@ class ModelRouter:
             try:
                 async for chunk in provider.chat_stream(
                     prompt, model=model, system_prompt=system_prompt,
-                    degraded=idx > 0, **kwargs,
+                    degraded=idx > 0, agent_name=agent_role, **kwargs,
                 ):
                     yield chunk
                 return

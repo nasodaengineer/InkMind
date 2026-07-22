@@ -328,6 +328,10 @@ class RunLoop:
         # 聚合 stats
         stats = self._llm.aggregate_stats()
 
+        # 持久化原始 ProviderStats 快照
+        raw_stats = self._llm.get_raw_stats()
+        await self._uow.t12_persist_stats(raw_stats)
+
         await self._uow.t10_run_finalize(
             run_id=self._run_id,
             new_status=RunStatus.AWAITING_HUMAN,
@@ -337,6 +341,11 @@ class RunLoop:
     async def _complete(self, content: str) -> None:
         """T10: 正常完成。"""
         stats = self._llm.aggregate_stats()
+
+        # 持久化原始 ProviderStats 快照
+        raw_stats = self._llm.get_raw_stats()
+        await self._uow.t12_persist_stats(raw_stats)
+
         await self._uow.t10_run_finalize(
             run_id=self._run_id,
             new_status=RunStatus.COMPLETED,
@@ -346,6 +355,11 @@ class RunLoop:
     async def _fail(self, error_msg: str) -> None:
         """T10: 标记失败。"""
         stats = self._llm.aggregate_stats()
+
+        # 持久化原始 ProviderStats 快照
+        raw_stats = self._llm.get_raw_stats()
+        await self._uow.t12_persist_stats(raw_stats)
+
         await self._uow.t10_run_finalize(
             run_id=self._run_id,
             new_status=RunStatus.FAILED,

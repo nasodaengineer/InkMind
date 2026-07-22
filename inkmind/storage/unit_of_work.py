@@ -29,6 +29,8 @@ from inkmind.storage.idempotency import (
     IdempotencyGuard,
     compute_packet_digest,
 )
+from inkmind.llm.providers.base import ProviderStats
+from inkmind.storage.models import ProviderStatsModel
 from inkmind.storage.repositories import (
     AppSettingsRepository,
     ChapterRepository,
@@ -40,6 +42,7 @@ from inkmind.storage.repositories import (
     OutlineSpineRepository,
     PipelineStateRepository,
     RunRepository,
+    StatsRepository,
     VolumeRepository,
     WorldRepository,
 )
@@ -86,6 +89,7 @@ class UnitOfWork:
         self.material_fragments = MaterialFragmentRepository(self._session) if self._session else None
         self.app_settings = AppSettingsRepository(self._session) if self._session else None
         self.idempotency = IdempotencyGuard(self._session) if self._session else None
+        self.stats = StatsRepository(self._session) if self._session else None
         self._lock_held = False
 
     @property
@@ -461,6 +465,34 @@ class UnitOfWork:
             settings_json: 完整 LLMConfig 序列化 dict
         """
         await self.app_settings.upsert(settings_json)
+
+    # ═══════════════════════════════════════════════════
+    #  T12: 持久化 Stats
+    # ═══════════════════════════════════════════════════
+
+    async def t12_persist_stats(self, stats_list: list[ProviderStats]) -> None:
+        """T12: 持久化 ProviderStats 快照到数据库。
+
+        Args:
+            stats_list: 来自 LLMClient.get_raw_stats() 的 ProviderStats 列表。
+        """
+        for s in stats_list:
+            model = ProviderStatsModel(
+                provider_name=s.provider_name,
+                model_name=s.model_name,
+                agent_name=s.agent_name,
+                latency_ms=s.latency_ms,
+                prompt_tokens=s.prompt_tokens,
+                completion_tokens=s.completion_tokens,
+                total_tokens=s.total_tokens,
+                estimated_cost=s.estimated_cost,
+                success=s.success,
+                error_type=s.error_type,
+                degraded=s.degraded,
+                retry_count=s.retry_count,
+                timestamp=s.timestamp,
+            )
+            self._session.add(model)
 
     # ═══════════════════════════════════════════════════
     #  T8: Run 启动

@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from inkmind.api.routes import health, novels, chapters, volumes, spine, runs, materials, settings
+from inkmind.api.routes import health, novels, chapters, volumes, spine, runs, materials, settings, stats
 
 
 @asynccontextmanager
@@ -59,6 +59,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     app.include_router(runs.router)
     app.include_router(materials.router)
     app.include_router(settings.router)
+    app.include_router(stats.router)
 
     # ── 静态文件与 SPA fallback（生产模式）──
     dist = Path(__file__).resolve().parent.parent.parent / "web" / "dist"

@@ -11,6 +11,8 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from datetime import datetime, timezone
+
 from inkmind.models.agent import PipelineState
 from inkmind.models.chapter import Chapter, ChapterVersion
 from inkmind.models.character import Character
@@ -23,12 +25,14 @@ from inkmind.storage.models import (
     ChapterModel,
     ChapterVersionModel,
     CharacterModel,
+    CompressionTaskModel,
     MaterialChunkModel,
     MaterialFragmentModel,
     MaterialSourceModel,
     NovelModel,
     OutlineSpineModel,
     PipelineStateModel,
+    ProviderStatsModel,
     RunsModel,
     VolumeModel,
     WorldModel,
@@ -1006,6 +1010,200 @@ class AppSettingsRepository:
                     settings_json=data,
                 )
             )
+
+
+# ═══════════════════════════════════════════════════════
+#  StatsRepository — LLM 调用统计
+# ═══════════════════════════════════════════════════════
+
+
+class StatsRepository:
+    """LLM 调用统计仓储。
+
+    持久化 ProviderStats 快照，支持时间窗聚合和四维拆分。
+    """
+
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    @staticmethod
+    def _window_filter(window: str) -> list:
+        """返回时间窗 WHERE 条件列表（作为 filter 参数解包使用）。"""
+        now = datetime.now(timezone.utc)
+        if window == "today":
+            from datetime import timedelta
+            start = now - timedelta(days=1)
+            return [ProviderStatsModel.timestamp >= start]
+        elif window == "7d":
+            from datetime import timedelta
+            start = now - timedelta(days=7)
+            return [ProviderStatsModel.timestamp >= start]
+        # "all" — 不过滤
+        return []
+
+    async def save(self, stats: ProviderStatsModel) -> None:
+        """保存一条统计记录。"""
+        self._session.add(stats)
+
+    async def batch_save(self, stats_list: list[ProviderStatsModel]) -> None:
+        """批量保存统计记录。"""
+        for s in stats_list:
+            self._session.add(s)
+
+    async def get_overview(self, window: str = "all") -> dict:
+        """按时间窗聚合总览统计。
+
+        Returns:
+            {total_calls, total_tokens, total_cost, avg_latency_ms, success_rate, degradation_rate}
+        """
+        filters = self._window_filter(window)
+        query = select(ProviderStatsModel)
+        for f in filters:
+            query = query.where(f)
+        result = await self._session.execute(query)
+        rows = result.scalars().all()
+
+        total_calls = len(rows)
+        if total_calls == 0:
+            return {
+                "total_calls": 0,
+                "total_tokens": 0,
+                "total_cost": 0.0,
+                "avg_latency_ms": 0.0,
+                "success_rate": 0.0,
+                "degradation_rate": 0.0,
+            }
+
+        total_tokens = sum(r.total_tokens for r in rows)
+        total_cost = sum(r.estimated_cost for r in rows)
+        avg_latency = sum(r.latency_ms for r in rows) / total_calls
+        success_count = sum(1 for r in rows if r.success)
+        degraded_count = sum(1 for r in rows if r.degraded)
+
+        return {
+            "total_calls": total_calls,
+            "total_tokens": total_tokens,
+            "total_cost": total_cost,
+            "avg_latency_ms": round(avg_latency, 2),
+            "success_rate": round(success_count / total_calls, 4),
+            "degradation_rate": round(degraded_count / total_calls, 4),
+        }
+
+    async def get_breakdown(self, window: str = "all", dimension: str = "provider") -> list[dict]:
+        """按维度拆分统计。
+
+        Args:
+            window: today / 7d / all
+            dimension: provider / model / agent / error
+
+        Returns:
+            [{dimension_key, calls, total_tokens, total_cost, avg_latency_ms, success_rate}, ...]
+        """
+        filters = self._window_filter(window)
+        query = select(ProviderStatsModel)
+        for f in filters:
+            query = query.where(f)
+        result = await self._session.execute(query)
+        rows = result.scalars().all()
+
+        # 映射 dimension 到 ProviderStatsModel 字段
+        dim_map = {
+            "provider": "provider_name",
+            "model": "model_name",
+            "agent": "agent_name",
+            "error": "error_type",
+        }
+        attr = dim_map.get(dimension, "provider_name")
+
+        from collections import defaultdict
+
+        groups: dict[str, dict] = defaultdict(lambda: {
+            "calls": 0, "total_tokens": 0, "total_cost": 0.0,
+            "latencies": [], "successes": 0,
+        })
+
+        for r in rows:
+            key = getattr(r, attr) or "(unknown)"
+            g = groups[key]
+            g["calls"] += 1
+            g["total_tokens"] += r.total_tokens
+            g["total_cost"] += r.estimated_cost
+            g["latencies"].append(r.latency_ms)
+            if r.success:
+                g["successes"] += 1
+
+        result_list = []
+        for key, g in groups.items():
+            avg_lat = sum(g["latencies"]) / len(g["latencies"]) if g["latencies"] else 0.0
+            result_list.append({
+                dimension: key,
+                "calls": g["calls"],
+                "total_tokens": g["total_tokens"],
+                "total_cost": round(g["total_cost"], 6),
+                "avg_latency_ms": round(avg_lat, 2),
+                "success_rate": round(g["successes"] / g["calls"], 4) if g["calls"] else 0.0,
+            })
+
+        result_list.sort(key=lambda x: x["calls"], reverse=True)
+        return result_list
+
+    async def get_runs(self, window: str = "all") -> list[dict]:
+        """获取 Run 历史。"""
+        filters = self._window_filter(window)
+        from sqlalchemy import select as sa_select
+        query = sa_select(RunsModel).order_by(RunsModel.created_at.desc()).limit(100)
+        for f in filters:
+            # RunsModel uses created_at field
+            pass
+        # Rebuild with proper field filter
+        from datetime import timedelta
+        now = datetime.now(timezone.utc)
+        q = sa_select(RunsModel)
+        if window == "today":
+            q = q.where(RunsModel.created_at >= now - timedelta(days=1))
+        elif window == "7d":
+            q = q.where(RunsModel.created_at >= now - timedelta(days=7))
+        q = q.order_by(RunsModel.created_at.desc()).limit(100)
+        result = await self._session.execute(q)
+        rows = result.scalars().all()
+        return [
+            {
+                "id": str(r.uuid),
+                "novel_id": str(r.novel_id),
+                "chapter_id": str(r.chapter_id) if r.chapter_id else None,
+                "kind": r.kind,
+                "status": r.status,
+                "phase": r.phase,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "started_at": r.started_at.isoformat() if r.started_at else None,
+                "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+            }
+            for r in rows
+        ]
+
+    async def get_compression_tasks(self) -> list[dict]:
+        """获取压缩任务列表（含失败任务的高亮信息）。"""
+        from sqlalchemy import select as sa_select
+        result = await self._session.execute(
+            sa_select(CompressionTaskModel)
+            .order_by(CompressionTaskModel.created_at.desc())
+            .limit(50)
+        )
+        rows = result.scalars().all()
+        return [
+            {
+                "task_id": str(r.task_id),
+                "novel_id": str(r.novel_id),
+                "range_start": r.range_start,
+                "range_end": r.range_end,
+                "status": r.status,
+                "error_message": r.error_message,
+                "started_at": r.started_at.isoformat() if r.started_at else None,
+                "completed_at": r.completed_at.isoformat() if r.completed_at else None,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in rows
+        ]
 
 
 def _material_fragment_from_orm(model) -> MaterialFragment:

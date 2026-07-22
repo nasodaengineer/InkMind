@@ -46,6 +46,7 @@ __all__ = [
     "OutlineSpineModel",
     "PipelineStateModel",
     "ProcessedDigestModel",
+    "ProviderStatsModel",
     "RunsModel",
     "VolumeModel",
     "WorldModel",
@@ -520,7 +521,38 @@ class ProcessedDigestModel(Base):
 
 
 # ═══════════════════════════════════════════════════════
-#  11. Runs — 执行生命周期
+#  11. ProviderStats — LLM 调用统计持久化
+# ═══════════════════════════════════════════════════════
+
+
+class ProviderStatsModel(Base):
+    """LLM 调用统计持久化（与 ProviderStats frozen dataclass 对应）。"""
+
+    __tablename__ = "provider_stats"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    provider_name: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    model_name: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    agent_name: Mapped[str] = mapped_column(String(30), default="", index=True)
+    latency_ms: Mapped[float] = mapped_column(Float, default=0.0)
+    prompt_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    completion_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    total_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    estimated_cost: Mapped[float] = mapped_column(Float, default=0.0)
+    success: Mapped[bool] = mapped_column(Boolean, default=True)
+    error_type: Mapped[str | None] = mapped_column(String(30), nullable=True, index=True)
+    degraded: Mapped[bool] = mapped_column(Boolean, default=False)
+    retry_count: Mapped[int] = mapped_column(Integer, default=0)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        index=True,
+    )
+
+
+# ═══════════════════════════════════════════════════════
+#  12. Runs — 执行生命周期
 # ═══════════════════════════════════════════════════════
 
 

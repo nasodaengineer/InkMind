@@ -19,6 +19,41 @@ from inkmind.models.llm import ProviderConfig, RetryConfig
 
 
 # ---------------------------------------------------------------------------
+# 内置单价表（USD / 1K tokens）
+# ---------------------------------------------------------------------------
+
+PRICING: dict[str, dict[str, float]] = {
+    # DeepSeek
+    "deepseek-chat":          {"input": 0.00027, "output": 0.00110},
+    "deepseek-reasoner":      {"input": 0.00055, "output": 0.00219},
+    "deepseek-v4-pro":        {"input": 0.00040, "output": 0.00160},
+    "deepseek-v4-flash":      {"input": 0.00015, "output": 0.00060},
+    # Claude
+    "claude-sonnet-4":        {"input": 0.00300, "output": 0.01500},
+    "claude-3-opus":          {"input": 0.01500, "output": 0.07500},
+    "claude-3-sonnet":        {"input": 0.00300, "output": 0.01500},
+    "claude-3-haiku":         {"input": 0.00025, "output": 0.00125},
+    "claude-sonnet-4-20250514": {"input": 0.00300, "output": 0.01500},
+    # GPT
+    "gpt-4o":                 {"input": 0.00250, "output": 0.01000},
+    "gpt-4o-mini":            {"input": 0.00015, "output": 0.00060},
+    "gpt-4":                  {"input": 0.03000, "output": 0.06000},
+    "gpt-3.5-turbo":          {"input": 0.00100, "output": 0.00200},
+    # Ollama（免费/本地，标记极低象征性成本）
+    "ollama":                 {"input": 0.00001, "output": 0.00002},
+}
+
+
+def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    """根据内置单价表估算一次 LLM 调用的 USD 成本。
+
+    若模型不在表中，按 deepseek-v4-flash 价格兜底。
+    """
+    rates = PRICING.get(model, PRICING["deepseek-v4-flash"])
+    return (prompt_tokens / 1000.0) * rates["input"] + (completion_tokens / 1000.0) * rates["output"]
+
+
+# ---------------------------------------------------------------------------
 # 数据类
 # ---------------------------------------------------------------------------
 
@@ -45,16 +80,17 @@ class ProviderStats:
     """
     provider_name: str          # 实际使用的 Provider（降级后可能是备用）
     model_name: str             # 实际使用的模型
-    latency_ms: float           # 端到端延迟（毫秒）
-    prompt_tokens: int          # 输入 Token 数
-    completion_tokens: int      # 输出 Token 数
-    total_tokens: int           # 总 Token 数
-    estimated_cost: float       # 估算费用（USD）
-    success: bool               # 是否成功
-    error_type: Optional[str]   # 失败时的错误类别（timeout / rate_limit / auth / cancelled / unknown）
-    degraded: bool              # 是否经过降级链
-    retry_count: int            # 重试次数
-    timestamp: datetime         # 调用时间
+    agent_name: str = ""        # 发起调用的 Agent 角色名
+    latency_ms: float = 0.0     # 端到端延迟（毫秒）
+    prompt_tokens: int = 0      # 输入 Token 数
+    completion_tokens: int = 0  # 输出 Token 数
+    total_tokens: int = 0       # 总 Token 数
+    estimated_cost: float = 0.0 # 估算费用（USD）
+    success: bool = True        # 是否成功
+    error_type: Optional[str] = None  # 失败时的错误类别
+    degraded: bool = False      # 是否经过降级链
+    retry_count: int = 0        # 重试次数
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))  # 调用时间
 
 
 def aggregate_snapshots(history: List[ProviderStats]) -> dict:
@@ -296,6 +332,7 @@ class BaseProvider(ABC):
         system_prompt: Optional[str] = None,
         *,
         degraded: bool = False,
+        agent_name: str = "",
         **kwargs,
     ) -> LLMResponse:
         """统一非流式 chat 接口。
@@ -303,6 +340,7 @@ class BaseProvider(ABC):
         Args:
             degraded: 本调用是否经由降级链（由 ModelRouter 标记），
                       记入 Stats 快照（ADR-0010 §10-A）。
+            agent_name: 发起调用的 Agent 角色名。
         """
         effective_model = model or (self.config.models[0] if self.config.models else "unknown")
         messages = self._build_messages(prompt, system_prompt)
@@ -311,7 +349,7 @@ class BaseProvider(ABC):
 
         def _snap(**kw) -> ProviderStats:
             return self._record_call(
-                model=effective_model, start=call_start, degraded=degraded, **kw
+                model=effective_model, start=call_start, degraded=degraded, agent_name=agent_name, **kw
             )
 
         async with self._semaphore:
@@ -365,6 +403,7 @@ class BaseProvider(ABC):
         system_prompt: Optional[str] = None,
         *,
         degraded: bool = False,
+        agent_name: str = "",
         **kwargs,
     ) -> AsyncGenerator[str, None]:
         """统一流式 chat 接口。"""
@@ -375,7 +414,7 @@ class BaseProvider(ABC):
 
         def _snap(**kw) -> ProviderStats:
             return self._record_call(
-                model=effective_model, start=call_start, degraded=degraded, **kw
+                model=effective_model, start=call_start, degraded=degraded, agent_name=agent_name, **kw
             )
 
         async with self._semaphore:
@@ -430,6 +469,7 @@ class BaseProvider(ABC):
         error: Optional[BaseException] = None,
         retry_count: int = 0,
         degraded: bool = False,
+        agent_name: str = "",
     ) -> ProviderStats:
         """埋点（ADR-0010 §10-B）：生成不可变快照，追加历史并转发 sink。
 
@@ -442,14 +482,16 @@ class BaseProvider(ABC):
             total_tokens = usage.get("total_tokens") or (
                 prompt_tokens + completion_tokens
             )
+        estimated = estimate_cost(model, prompt_tokens, completion_tokens)
         snapshot = ProviderStats(
             provider_name=self.config.name,
             model_name=model,
+            agent_name=agent_name,
             latency_ms=(time.monotonic() - start) * 1000.0,
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
-            estimated_cost=0.0,
+            estimated_cost=estimated,
             success=success,
             error_type=None if success else _classify_error(error),
             degraded=degraded,

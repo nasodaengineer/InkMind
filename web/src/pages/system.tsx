@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import {
-  Settings,
   Plus,
   Trash2,
   Save,
@@ -8,19 +7,34 @@ import {
   AlertTriangle,
   Check,
   X,
+  BarChart3,
+  Clock,
+  Cpu,
+  DollarSign,
+  Activity,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { api, type AppSettings, type ProviderItem, type ModelBindingItem } from "@/lib/api"
+import {
+  api,
+  type AppSettings,
+  type ProviderItem,
+  type ModelBindingItem,
+  type StatsOverview,
+  type StatsBreakdownItem,
+  type StatsRunItem,
+  type CompressionTaskItem,
+} from "@/lib/api"
 import { cn } from "@/lib/utils"
 
 // ── Tab 定义 ──
 
-type Tab = "providers" | "bindings" | "advanced"
+type Tab = "providers" | "bindings" | "advanced" | "stats"
 
 const TABS: { key: Tab; label: string }[] = [
   { key: "providers", label: "Provider" },
   { key: "bindings", label: "模型路由" },
   { key: "advanced", label: "高级" },
+  { key: "stats", label: "统计" },
 ]
 
 // ── 空 Provider 模板 ──
@@ -81,6 +95,17 @@ export default function SystemPage() {
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null)
   const [fakeMode, setFakeMode] = useState(false)
 
+  // ── Stats 状态 ──
+
+  const [statsWindow, setStatsWindow] = useState<"today" | "7d" | "all">("all")
+  const [statsDimension, setStatsDimension] = useState<"provider" | "model" | "agent" | "error">("provider")
+  const [statsOverview, setStatsOverview] = useState<StatsOverview | null>(null)
+  const [statsBreakdown, setStatsBreakdown] = useState<StatsBreakdownItem[]>([])
+  const [statsRuns, setStatsRuns] = useState<StatsRunItem[]>([])
+  const [statsCompression, setStatsCompression] = useState<CompressionTaskItem[]>([])
+  const [statsLoading, setStatsLoading] = useState(false)
+  const statsLoadedRef = useRef(false)
+
   // ── 加载数据 ──
 
   const load = useCallback(async () => {
@@ -102,11 +127,47 @@ export default function SystemPage() {
     }
   }, [])
 
+  // ── Stats 数据加载 ──
+
+  const loadStats = useCallback(async (
+    w: "today" | "7d" | "all",
+    dim: "provider" | "model" | "agent" | "error",
+  ) => {
+    setStatsLoading(true)
+    try {
+      const [overview, breakdown, runs, compression] = await Promise.all([
+        api.stats.overview(w),
+        api.stats.breakdown(w, dim),
+        api.stats.runs(w),
+        api.stats.compressionTasks(),
+      ])
+      setStatsOverview(overview)
+      setStatsBreakdown(breakdown)
+      setStatsRuns(runs)
+      setStatsCompression(compression)
+      statsLoadedRef.current = true
+    } catch (e: unknown) {
+      console.error("加载统计失败", e)
+    } finally {
+      setStatsLoading(false)
+    }
+  }, [])
+
+  const reloadStats = useCallback(() => {
+    loadStats(statsWindow, statsDimension)
+  }, [loadStats, statsWindow, statsDimension])
+
   useEffect(() => {
     load()
     // 检测虚拟模式：通过尝试 fetch 一个已知不存在环境变量的 provider 来推断
     // 简单方式：检查 settings 中所有 provider 的 api_key 是否都为空
   }, [load])
+
+  useEffect(() => {
+    if (activeTab === "stats") {
+      loadStats(statsWindow, statsDimension)
+    }
+  }, [activeTab, statsWindow, statsDimension, loadStats])
 
   // ── Provider 操作 ──
 
@@ -378,6 +439,20 @@ export default function SystemPage() {
           </div>
         </div>
       )}
+
+      {/* ── Stats Tab ── */}
+      {activeTab === "stats" && <StatsPanel
+        window={statsWindow}
+        onWindowChange={setStatsWindow}
+        dimension={statsDimension}
+        onDimensionChange={setStatsDimension}
+        overview={statsOverview}
+        breakdown={statsBreakdown}
+        runs={statsRuns}
+        compression={statsCompression}
+        loading={statsLoading}
+        onReload={reloadStats}
+      />}
     </div>
   )
 }
@@ -511,6 +586,331 @@ function ProviderCard({
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// ── StatsPanel ──
+
+const DIMENSIONS = [
+  { key: "provider" as const, label: "Provider" },
+  { key: "model" as const, label: "模型" },
+  { key: "agent" as const, label: "Agent" },
+  { key: "error" as const, label: "错误类型" },
+]
+
+const WINDOWS = [
+  { key: "today" as const, label: "今日" },
+  { key: "7d" as const, label: "7 日" },
+  { key: "all" as const, label: "全部" },
+]
+
+function StatsPanel({
+  window,
+  onWindowChange,
+  dimension,
+  onDimensionChange,
+  overview,
+  breakdown,
+  runs,
+  compression,
+  loading,
+  onReload,
+}: {
+  window: "today" | "7d" | "all"
+  onWindowChange: (w: "today" | "7d" | "all") => void
+  dimension: "provider" | "model" | "agent" | "error"
+  onDimensionChange: (d: "provider" | "model" | "agent" | "error") => void
+  overview: StatsOverview | null
+  breakdown: StatsBreakdownItem[]
+  runs: StatsRunItem[]
+  compression: CompressionTaskItem[]
+  loading: boolean
+  onReload: () => void
+}) {
+  if (loading && !overview) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
+        <span className="ml-2 text-muted-foreground">加载统计中...</span>
+      </div>
+    )
+  }
+
+  // 找到最新的失败压缩任务
+  const failedTasks = compression.filter((t) => t.status === "failed")
+  const latestFailed = failedTasks.length > 0 ? failedTasks[0] : null
+
+  return (
+    <div className="space-y-6">
+      {/* ── 时间窗切换 ── */}
+      <div className="flex items-center justify-between">
+        <div className="flex gap-1 bg-muted rounded-lg p-1">
+          {WINDOWS.map((w) => (
+            <button
+              key={w.key}
+              onClick={() => onWindowChange(w.key)}
+              className={cn(
+                "px-3 py-1.5 text-sm rounded-md transition-colors",
+                window === w.key
+                  ? "bg-background shadow-sm text-foreground font-medium"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {w.label}
+            </button>
+          ))}
+        </div>
+        <Button variant="ghost" size="sm" onClick={onReload}>
+          <Loader2 className={cn("w-4 h-4 mr-1", loading && "animate-spin")} />
+          刷新
+        </Button>
+      </div>
+
+      {/* ── 四张概览卡 ── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <OverviewCard
+          icon={<Cpu className="w-5 h-5" />}
+          label="调用次数"
+          value={overview ? String(overview.total_calls) : "-"}
+        />
+        <OverviewCard
+          icon={<Activity className="w-5 h-5" />}
+          label="Token 用量"
+          value={overview ? overview.total_tokens.toLocaleString() : "-"}
+        />
+        <OverviewCard
+          icon={<DollarSign className="w-5 h-5" />}
+          label="成本（估算）"
+          value={overview ? `$${overview.total_cost.toFixed(4)}` : "-"}
+          badge="估算"
+        />
+        <OverviewCard
+          icon={<Clock className="w-5 h-5" />}
+          label="平均延迟"
+          value={overview ? `${overview.avg_latency_ms.toFixed(0)}ms` : "-"}
+        />
+      </div>
+
+      {/* 额外指标行 */}
+      {overview && (
+        <div className="flex gap-6 text-sm text-muted-foreground">
+          <span>成功率: <span className={cn("font-medium", overview.success_rate >= 0.9 ? "text-green-600" : "text-amber-600")}>{(overview.success_rate * 100).toFixed(1)}%</span></span>
+          <span>降级率: <span className="font-medium">{(overview.degradation_rate * 100).toFixed(1)}%</span></span>
+        </div>
+      )}
+
+      {/* ── 四维拆分 ── */}
+      <div>
+        <div className="flex items-center gap-2 mb-3">
+          <BarChart3 className="w-4 h-4 text-muted-foreground" />
+          <h3 className="text-sm font-medium">四维拆分</h3>
+        </div>
+        <div className="flex gap-1 bg-muted rounded-lg p-1 mb-3">
+          {DIMENSIONS.map((d) => (
+            <button
+              key={d.key}
+              onClick={() => onDimensionChange(d.key)}
+              className={cn(
+                "px-3 py-1.5 text-sm rounded-md transition-colors",
+                dimension === d.key
+                  ? "bg-background shadow-sm text-foreground font-medium"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {d.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="rounded-md border overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-muted/50">
+                <th className="text-left px-3 py-2 font-medium">{dimension === "provider" ? "Provider" : dimension === "model" ? "模型" : dimension === "agent" ? "Agent" : "错误类型"}</th>
+                <th className="text-right px-3 py-2 font-medium">调用</th>
+                <th className="text-right px-3 py-2 font-medium">Token</th>
+                <th className="text-right px-3 py-2 font-medium">成本</th>
+                <th className="text-right px-3 py-2 font-medium">延迟</th>
+                <th className="text-right px-3 py-2 font-medium">成功率</th>
+              </tr>
+            </thead>
+            <tbody>
+              {breakdown.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="text-center text-muted-foreground py-6">暂无数据</td>
+                </tr>
+              ) : (
+                breakdown.map((item, i) => {
+                  const name = item.provider ?? item.model ?? item.agent ?? item.error ?? "(unknown)"
+                  return (
+                    <tr key={i} className="border-t hover:bg-muted/30">
+                      <td className="px-3 py-2 font-mono text-xs">{name}</td>
+                      <td className="text-right px-3 py-2">{item.calls}</td>
+                      <td className="text-right px-3 py-2 text-muted-foreground">{item.total_tokens.toLocaleString()}</td>
+                      <td className="text-right px-3 py-2 text-muted-foreground">${item.total_cost.toFixed(4)}</td>
+                      <td className="text-right px-3 py-2 text-muted-foreground">{item.avg_latency_ms.toFixed(0)}ms</td>
+                      <td className="text-right px-3 py-2">
+                        <span className={item.success_rate >= 0.9 ? "text-green-600" : item.success_rate >= 0.5 ? "text-amber-600" : "text-red-600"}>
+                          {(item.success_rate * 100).toFixed(0)}%
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── Run 历史 ── */}
+      <div>
+        <h3 className="text-sm font-medium mb-3">Run 历史</h3>
+        <div className="rounded-md border overflow-hidden max-h-64 overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-background">
+              <tr className="bg-muted/50">
+                <th className="text-left px-3 py-2 font-medium">Kind</th>
+                <th className="text-left px-3 py-2 font-medium">状态</th>
+                <th className="text-left px-3 py-2 font-medium">阶段</th>
+                <th className="text-right px-3 py-2 font-medium">时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {runs.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="text-center text-muted-foreground py-6">暂无 Run 记录</td>
+                </tr>
+              ) : (
+                runs.map((run) => (
+                  <tr key={run.id} className="border-t hover:bg-muted/30">
+                    <td className="px-3 py-2">
+                      <span className={cn(
+                        "inline-block text-xs px-1.5 py-0.5 rounded",
+                        run.kind === "generate" && "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
+                        run.kind === "revise" && "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
+                        run.kind === "finalize" && "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
+                        run.kind === "plan" && "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-300",
+                      )}>
+                        {run.kind}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={cn(
+                        "inline-block text-xs px-1.5 py-0.5 rounded",
+                        run.status === "completed" && "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
+                        run.status === "running" && "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
+                        run.status === "failed" && "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",
+                        run.status === "cancelled" && "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300",
+                        run.status === "awaiting_human" && "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300",
+                      )}>
+                        {run.status}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-muted-foreground">{run.phase || "-"}</td>
+                    <td className="text-right px-3 py-2 text-muted-foreground text-xs">
+                      {run.created_at ? new Date(run.created_at).toLocaleString() : "-"}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* ── 压缩任务 ── */}
+      <div>
+        <h3 className="text-sm font-medium mb-3">压缩任务</h3>
+        <div className="rounded-md border overflow-hidden max-h-64 overflow-y-auto">
+          <table className="w-full text-sm">
+            <thead className="sticky top-0 bg-background">
+              <tr className="bg-muted/50">
+                <th className="text-left px-3 py-2 font-medium">范围</th>
+                <th className="text-left px-3 py-2 font-medium">状态</th>
+                <th className="text-left px-3 py-2 font-medium">错误</th>
+                <th className="text-right px-3 py-2 font-medium">时间</th>
+              </tr>
+            </thead>
+            <tbody>
+              {compression.length === 0 ? (
+                <tr>
+                  <td colSpan={4} className="text-center text-muted-foreground py-6">暂无压缩任务</td>
+                </tr>
+              ) : (
+                compression.map((task) => (
+                  <tr key={task.task_id} className={cn(
+                    "border-t hover:bg-muted/30",
+                    task.status === "failed" && "bg-red-50 dark:bg-red-900/10",
+                  )}>
+                    <td className="px-3 py-2 font-mono text-xs">
+                      Ch.{task.range_start}-{task.range_end}
+                    </td>
+                    <td className="px-3 py-2">
+                      <span className={cn(
+                        "inline-block text-xs px-1.5 py-0.5 rounded",
+                        task.status === "completed" && "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300",
+                        task.status === "running" && "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-300",
+                        task.status === "failed" && "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-300",
+                        task.status === "pending" && "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-300",
+                      )}>
+                        {task.status}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground max-w-[200px] truncate">
+                      {task.error_message || "-"}
+                    </td>
+                    <td className="text-right px-3 py-2 text-muted-foreground text-xs">
+                      {task.created_at ? new Date(task.created_at).toLocaleString() : "-"}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {/* 最新失败任务高亮红卡 */}
+        {latestFailed && (
+          <div className="mt-3 rounded-md border border-red-300 bg-red-50 dark:bg-red-900/10 dark:border-red-800 p-3">
+            <div className="flex items-center gap-2 text-sm font-medium text-red-800 dark:text-red-200">
+              <AlertTriangle className="w-4 h-4" />
+              最新失败压缩任务
+            </div>
+            <div className="mt-1 text-xs text-red-700 dark:text-red-300">
+              Ch.{latestFailed.range_start}-{latestFailed.range_end} | {latestFailed.error_message || "未知错误"}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function OverviewCard({
+  icon,
+  label,
+  value,
+  badge,
+}: {
+  icon: ReactNode
+  label: string
+  value: string
+  badge?: string
+}) {
+  return (
+    <div className="rounded-md border p-4">
+      <div className="flex items-center gap-2 text-muted-foreground mb-2">
+        {icon}
+        <span className="text-xs">{label}</span>
+        {badge && (
+          <span className="text-[10px] bg-muted px-1 py-0.5 rounded text-muted-foreground ml-auto">
+            {badge}
+          </span>
+        )}
+      </div>
+      <div className="text-xl font-semibold tabular-nums">{value}</div>
     </div>
   )
 }

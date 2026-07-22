@@ -182,6 +182,53 @@ export type SettingsUpdateData = {
   default_model: string
 }
 
+// ── Stats Types ──
+
+export interface StatsOverview {
+  total_calls: number
+  total_tokens: number
+  total_cost: number
+  avg_latency_ms: number
+  success_rate: number
+  degradation_rate: number
+}
+
+export interface StatsBreakdownItem {
+  provider?: string
+  model?: string
+  agent?: string
+  error?: string
+  calls: number
+  total_tokens: number
+  total_cost: number
+  avg_latency_ms: number
+  success_rate: number
+}
+
+export interface StatsRunItem {
+  id: string
+  novel_id: string
+  chapter_id: string | null
+  kind: string
+  status: string
+  phase: string
+  created_at: string | null
+  started_at: string | null
+  completed_at: string | null
+}
+
+export interface CompressionTaskItem {
+  task_id: string
+  novel_id: string
+  range_start: number
+  range_end: number
+  status: string
+  error_message: string | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string | null
+}
+
 // ── API ──
 
 export const api = {
@@ -347,5 +394,19 @@ export const api = {
       }),
     getProviderModels: () =>
       request<ProviderModelsResponse>("/settings/provider-models"),
+  },
+
+  stats: {
+    overview: (window: "today" | "7d" | "all" = "all") =>
+      request<StatsOverview>(`/stats/overview?window=${window}`),
+
+    breakdown: (window: "today" | "7d" | "all" = "all", dimension: "provider" | "model" | "agent" | "error" = "provider") =>
+      request<StatsBreakdownItem[]>(`/stats/breakdown?window=${window}&dimension=${dimension}`),
+
+    runs: (window: "today" | "7d" | "all" = "all") =>
+      request<StatsRunItem[]>(`/stats/runs?window=${window}`),
+
+    compressionTasks: () =>
+      request<CompressionTaskItem[]>("/stats/compression-tasks"),
   },
 }

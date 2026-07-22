@@ -106,6 +106,10 @@ class LLMClient:
         """返回当前会话的汇总统计（total_calls/tokens/cost/延迟/成功率/降级率）。"""
         return aggregate_snapshots(self._stats_history)
 
+    def get_raw_stats(self) -> list[ProviderStats]:
+        """返回原始 ProviderStats 列表（用于持久化到数据库）。"""
+        return list(self._stats_history)
+
     def reset_stats(self) -> None:
         """清空会话 Stats 历史（含各 Provider 的调用快照历史）。"""
         self._stats_history.clear()
