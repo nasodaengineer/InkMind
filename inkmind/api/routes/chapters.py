@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from inkmind.api.deps import get_db
+from inkmind.models.agent import ChapterStatus
 from inkmind.storage.repositories import ChapterRepository
 
 router = APIRouter(tags=["chapters"])
@@ -23,6 +24,24 @@ class ChapterItem(BaseModel):
     version: int
     updated_at: str
     word_count: int
+
+
+class ChapterDetail(BaseModel):
+    id: str
+    index: int
+    title: str
+    content: str
+    status: str
+    summary: str
+    version: int
+    word_count: int
+    updated_at: str
+
+
+class ChapterPatchRequest(BaseModel):
+    title: str | None = None
+    content: str | None = None
+    status: str | None = None
 
 
 @router.get("/api/novels/{novel_id}/chapters")
@@ -46,3 +65,67 @@ async def list_chapters(
         )
         for ch in chapters
     ]
+
+
+@router.get("/api/novels/{novel_id}/chapters/{chapter_id}")
+async def get_chapter(
+    novel_id: UUID,
+    chapter_id: UUID,
+    session: AsyncSession = Depends(get_db),
+) -> ChapterDetail:
+    """获取单章详情（含正文内容）。"""
+    repo = ChapterRepository(session)
+    chapter = await repo.get_by_id(chapter_id)
+    if chapter is None:
+        raise HTTPException(status_code=404, detail="章节不存在")
+    return _chapter_to_detail(chapter)
+
+
+@router.patch("/api/novels/{novel_id}/chapters/{chapter_index}")
+async def patch_chapter(
+    novel_id: UUID,
+    chapter_index: int,
+    body: ChapterPatchRequest,
+    session: AsyncSession = Depends(get_db),
+) -> ChapterDetail:
+    """更新章节（状态/内容/标题）。"""
+    repo = ChapterRepository(session)
+    chapter = await repo.get_by_novel_and_index(novel_id, chapter_index)
+    if chapter is None:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    if body.title is not None:
+        chapter.title = body.title
+    if body.content is not None:
+        chapter.content = body.content
+    if body.status is not None:
+        try:
+            chapter.status = ChapterStatus(body.status)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"无效的状态: {body.status}",
+            )
+
+    await repo.save(chapter)
+    await session.commit()
+
+    updated = await repo.get_by_novel_and_index(novel_id, chapter_index)
+    if updated is None:
+        raise HTTPException(status_code=500, detail="保存后读取章节失败")
+    return _chapter_to_detail(updated)
+
+
+def _chapter_to_detail(chapter) -> ChapterDetail:
+    """将 Chapter 领域模型转换为响应。"""
+    return ChapterDetail(
+        id=str(chapter.id),
+        index=chapter.index,
+        title=chapter.title,
+        content=chapter.content,
+        status=chapter.status.value if hasattr(chapter.status, "value") else str(chapter.status),
+        summary=chapter.summary,
+        version=chapter.version,
+        word_count=len(chapter.content),
+        updated_at=chapter.updated_at.isoformat(),
+    )

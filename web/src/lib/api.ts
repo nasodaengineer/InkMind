@@ -41,6 +41,23 @@ export interface ChapterItem {
   word_count: number
 }
 
+export interface ChapterDetail {
+  id: string
+  index: number
+  title: string
+  content: string
+  status: string
+  summary: string
+  version: number
+  word_count: number
+  updated_at: string
+}
+
+export interface StartRunRequest {
+  kind: string
+  chapter_id?: string | null
+}
+
 export interface VolumeItem {
   id: string
   novel_id: string
@@ -286,11 +303,16 @@ export const api = {
     list: (novelId: string) =>
       request<ChapterItem[]>(`/novels/${novelId}/chapters`),
 
+    get: (novelId: string, chapterId: string) =>
+      request<ChapterDetail>(`/novels/${novelId}/chapters/${chapterId}`),
+
     patch: (
       novelId: string,
       chapterIndex: number,
       data: {
         title?: string
+        content?: string
+        status?: string
         summary?: string
         key_events?: string[]
         rhythm_marker?: string | null
@@ -298,7 +320,7 @@ export const api = {
         involved?: string[]
       },
     ) =>
-      request<ChapterOutlineItem>(
+      request<ChapterDetail>(
         `/novels/${novelId}/chapters/${chapterIndex}`,
         { method: "PATCH", body: JSON.stringify(data) },
       ),
@@ -525,7 +547,14 @@ export const api = {
     get: (novelId: string, runId: string) =>
       request<RunItem>(`/novels/${novelId}/runs/${runId}`),
 
-    /** 启动 run（含 planner 参数） */
+    /** 启动 run（通用，kind=generate 用于写作生成） */
+    start: (novelId: string, params: StartRunRequest) =>
+      request<RunItem>(`/novels/${novelId}/runs`, {
+        method: "POST",
+        body: JSON.stringify(params),
+      }),
+
+    /** 启动 planner run */
     startPlan: (novelId: string, params: StartRunPlannerParams & { kind: string; chapter_id?: string }) =>
       request<RunItem>(`/novels/${novelId}/runs`, {
         method: "POST",
