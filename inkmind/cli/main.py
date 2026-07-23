@@ -35,9 +35,10 @@ def build_parser() -> argparse.ArgumentParser:
         commit,
         restore,
         version,
+        serve,
     )
 
-    for mod in (init, write, plan, review, next, status, shell, commit, restore, version):
+    for mod in (init, write, plan, review, next, status, shell, commit, restore, version, serve):
         mod.setup(subparsers)
 
     return parser
@@ -73,6 +74,7 @@ def main() -> None:
         commit,
         restore,
         version,
+        serve,
     )
 
     cmd_map = {
@@ -86,6 +88,7 @@ def main() -> None:
         "commit": commit,
         "restore": restore,
         "version": version,
+        "serve": serve,
     }
 
     cmd = cmd_map.get(args.command)

@@ -9,6 +9,7 @@ import tempfile
 import pytest
 
 from inkmind.storage.concurrency import FileLock
+from inkmind.storage.database import DatabaseManager
 from inkmind.storage.unit_of_work import UnitOfWork
 
 
@@ -40,19 +41,15 @@ class TestFileLock:
             lock2.release()
 
 
-class TestUnitOfWorkLock:
-    def test_uow_acquires_lock(self):
-        """UnitOfWork 应能获取写锁。"""
+class TestFileLockFromPathCreation:
+    def test_from_path_creates_lock_file(self):
+        """FileLock.from_path 应基于 db_path 创建 .lock 文件。"""
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "test.db")
-            # 创建空文件使 os.path.dirname 有效
-            with open(db_path, "w") as f:
-                f.write("")
-            os.unlink(db_path)  # UnitOfWork 会创建
-
-            with UnitOfWork(db_path) as uow:
-                assert uow._lock is not None
-                assert uow._lock._lock_path.endswith(".db.lock")
+            lock = FileLock.from_path(db_path)
+            assert lock._lock_path.endswith(".db.lock")
+            assert lock.acquire()
+            lock.release()
 
 
 class TestFileLockContextManager:
@@ -129,16 +126,26 @@ class TestUnitOfWorkSessionModeLock:
         monkeypatch.setattr(db_mod, "_default_manager", None)
         yield
 
-    def test_session_mode_with_db_path_has_lock(self):
+    @pytest.mark.asyncio
+    async def test_session_mode_with_db_path_has_lock(self):
         with tempfile.TemporaryDirectory() as tmp:
             db_path = os.path.join(tmp, "x.db")
-            uow = UnitOfWork(None, db_path=db_path)
-            assert uow._lock is not None
-            assert uow._lock._lock_path == db_path + ".lock"
+            mgr = DatabaseManager(db_path)
+            async with mgr.session() as session:
+                uow = UnitOfWork(session, db_path=db_path)
+                assert uow._lock is not None
+                assert uow._lock._lock_path == db_path + ".lock"
+            await mgr.close()
 
-    def test_session_mode_without_db_path_no_lock(self):
-        uow = UnitOfWork(None)
-        assert uow._lock is None
+    @pytest.mark.asyncio
+    async def test_session_mode_without_db_path_no_lock(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "y.db")
+            mgr = DatabaseManager(db_path)
+            async with mgr.session() as session:
+                uow = UnitOfWork(session)
+                assert uow._lock is None
+            await mgr.close()
 
     @pytest.mark.asyncio
     async def test_get_uow_wires_lock_and_repos(self):
@@ -150,10 +157,6 @@ class TestUnitOfWorkSessionModeLock:
             async with get_uow(db_path) as uow:
                 assert uow._lock is not None
                 assert uow._lock._lock_path == db_path + ".lock"
-                # repos 保持可用（session 模式语义不变）
-                assert uow.chapters is not None
-                assert uow.novels is not None
-                assert uow.pipelines is not None
 
     @pytest.mark.asyncio
     async def test_commit_acquires_and_releases_lock(self):

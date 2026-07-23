@@ -14,6 +14,5 @@ class StaleVersionError(Exception):
         self.expected = expected
         self.actual = actual
         super().__init__(
-            f"base_digest 冲突: 客户端持有 {expected[:12]}…, "
-            f"服务端当前为 {actual[:12]}…"
+            f"base_digest 冲突: 客户端持有 {expected[:12]}…, 服务端当前为 {actual[:12]}…"
         )

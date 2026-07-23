@@ -93,9 +93,7 @@ class CommentThread(BaseModel):
     def transition_to(self, new_status: ThreadStatus) -> None:
         """执行状态转换，非法转换抛 ValueError。"""
         if not can_transition(self.status, new_status):
-            raise ValueError(
-                f"非法状态转换: {self.status.value} → {new_status.value}"
-            )
+            raise ValueError(f"非法状态转换: {self.status.value} → {new_status.value}")
         self.status = new_status
         self.updated_at = datetime.now(timezone.utc)
         if new_status == ThreadStatus.resolved:

@@ -17,7 +17,6 @@ import {
   reconcileMarks,
   refreshFingerprint,
   CommentStore,
-  type AnchorFingerprint,
   type ThreadData,
 } from "../lib/comment-store"
 

@@ -22,9 +22,7 @@ class CharacterTimelineEntry(BaseModel):
 
     chapter_index: int = Field(ge=1, description="章节序号")
     key_events: list[str] = Field(default_factory=list, description="本章角色关键事件")
-    current_state: str | None = Field(
-        default=None, description="该章结束时角色的状态描述"
-    )
+    current_state: str | None = Field(default=None, description="该章结束时角色的状态描述")
 
 
 class Character(BaseModel):

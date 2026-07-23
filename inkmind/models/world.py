@@ -92,8 +92,6 @@ class World(BaseModel):
     timeline_markers: list[TimelineMarker] = Field(default_factory=list)
     power_system: PowerSystem | None = Field(default=None)
     magic_system: MagicSystem | None = Field(default=None)
-    location_tree: list[Location] = Field(
-        default_factory=list, description="结构化地点层级树"
-    )
+    location_tree: list[Location] = Field(default_factory=list, description="结构化地点层级树")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))

@@ -1,4 +1,5 @@
 """inkmind version — 显示版本信息。"""
+
 from __future__ import annotations
 
 from inkmind.cli.base_command import BaseCommand
@@ -23,6 +24,7 @@ class VersionCommand(BaseCommand):
         """显示版本号。"""
         try:
             from importlib.metadata import version as _pkg_version
+
             ver = _pkg_version("inkmind")
         except (ImportError, Exception):
             ver = VERSION

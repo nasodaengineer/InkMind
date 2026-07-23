@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>原型 · 大纲规划视图 v2（#30）</title>
+<!--
+  PROTOTYPE — throwaway，不进 main。
+  问题：基于调研报告《docs/网络小说百万字大纲研究报告.md》重新设计大纲规划视图（wayfinder 工单 #30，地图 #12）。
+  调研核心结论 → 本票设计前提：百万字大纲 = 三级嵌套体系——总纲（1000–5000 字：主线/结局/核心矛盾/卖点）
+    → 卷纲（每卷 200–500 字：主线/支线/阶段目标/卷末悬念）→ 章纲（每章 50–200 字：事件/人物/伏笔/钩子）。
+    现数据模型仅有章纲一层（ChapterOutline），总纲/卷纲无载体——三变体都把三级体系当既定前提，
+    分叉在「三级如何呈现与导航」：
+    A — 书脊树 · 层级导航 + 详情面板：左树（总纲/卷/章三级折叠）右详情，卷节点驱动规划
+    B — 卷轴 · 横向卷带故事地图：总纲顶条 + 每卷一条泳道横滚，章卡竖排带 ▲★ 节奏与伏笔 chip
+    C — 钻取 · 三级缩放：书（总纲 hero + 卷卡）→ 卷（卷纲 + 节奏轨道 + 章表）→ 章抽屉，面包屑导航
+  已被 #29 排除、本票不复现的方向：A 表格台账（平铺章表）/ B 文档阅读流（梗概长文）/ C 批次控制台（Run 中心）。
+  跨变体恒定（#19/#21/#22 已锁 + #29 遗留演示态，仅演示不讨论）：
+    · plan Run：novel 级 kind=plan，同书同时仅一活跃（409）；新语义 = 起点/章数落进「卷」语境（卷内续排/整卷起排）
+    · 落库：完成即 T9→T2 批量插 ChapterOutline + total_chapters 更新；取消 = 终态 cancelled 无部分稿
+    · 章纲编辑：PATCH chapters 大纲字段就地编辑即保存；已定稿锁定、人工门可改但不参与重规划
+    · 重规划 = start_index 落已规划区，覆盖范围内未开工章的既有大纲
+    · 跳转写作台 = 工作区章节模式 tab，原型不跨页，toast 示意；5–50 章/批
+  演示态新增语义（随本票裁决）：
+    · 卷为一等实体：卷纲四字段人工可编辑；卷有预计规模（章数范围），规划范围须落卷内，扩卷/跨卷语义留白
+    · 总纲/卷纲人工所有；「✦ AI 起草」= Planner 能力扩展（现仅产章纲），仅 toast 示意，待裁决成票
+    · 节奏标记（▲ 小高潮每 3–5 章 / ★ 卷末大高潮，§6.2）与伏笔 chip（埋/回收/待回收，§6.3 → L1 待回收伏笔表）
+      为展示层派生数据，存储模型未定
+  用法：底部浮条 ←/→ 或键盘方向键切换变体；URL ?variant=A|B|C；Esc 关抽屉/取消规划表单。
+  运行：双击本文件 —— 单文件、无依赖、无构建、无持久化（状态全在内存）。
+  预置演示（沿用 #29 《渡口灯火》数据，重排进三卷，规模≈真实百万字 1/10）：
+    卷一（1–10）：1–3 已定稿、4 人工门、5–10 已规划（批次#1/#2）；卷二（11–25）：11–15 已规划（批次#3）、16–25 未排；
+    卷三（26–40）：仅卷纲。伏笔演示：船票印记 1 埋 3 收 / 半张航运图 4 埋 9 收 / 梁上警告记号·母亲手记 待回收。
+  输入来源：调研报告 §2 三级体系 / §3 七大要素 / §6 分卷节奏 / §9 八步流程；#19 IA、#21 Run、#22 REST、#29 已弃三变体。
+-->
+<style>
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;display:flex;flex-direction:column;font:14px/1.55 system-ui,"Segoe UI","Microsoft YaHei",sans-serif;color:#2b2b2b;background:#fff}
+#stage{flex:1;min-height:0;display:flex;flex-direction:column}
+.meta{flex:none;background:#fff8e1;border-bottom:1px solid #e7d9a8;padding:5px 14px;font-size:12px;color:#6b5d1f;display:flex;gap:14px;flex-wrap:wrap;align-items:baseline}
+.meta b{letter-spacing:.08em}
+.shell{flex:1;min-height:0;display:flex}
+.rail{flex:none;width:62px;border-right:1px solid #ddd;padding:10px 6px;display:flex;flex-direction:column;gap:6px;background:#fafafa}
+.rni{padding:8px 4px;border-radius:6px;text-align:center;font-size:17px;user-select:none;color:#888}
+.rni small{display:block;font-size:10px;color:#777;margin-top:1px}
+.rni.on{background:#2b2b2b;color:#fff}
+.rni.on small{color:#ccc}
+.main{flex:1;min-width:0;min-height:0;padding:10px;overflow:auto;display:flex;flex-direction:column;gap:8px}
+.b{border:1.5px dashed #a8a8a8;border-radius:6px;background:#fcfcfc;padding:8px 10px;min-height:0;display:flex;flex-direction:column}
+.b>h4{margin:0 0 6px;font-size:11px;font-weight:600;letter-spacing:.12em;color:#8a8a8a;flex:none}
+.mut{color:#999}
+.hint{font-size:12px;color:#999}
+.btn{display:inline-block;border:1px solid #9a9a9a;background:#efefef;border-radius:5px;padding:3px 10px;font-size:12.5px;margin:2px 4px 2px 0;cursor:pointer;user-select:none}
+.btn:hover{background:#e4e4e4}
+.btn.pri{background:#2b2b2b;color:#fff;border-color:#2b2b2b}
+.btn.dan{border-color:#c66;color:#a33}
+.sbadge{font-size:11px;border-radius:999px;padding:0 7px;display:inline-block;white-space:nowrap}
+.sb-done{background:#e6f2e8;color:#2e7d32;border:1px solid #b4d8bc}
+.sb-partial{background:#fdf3e0;color:#a85b12;border:1px solid #e8c790}
+.sb-decomp{background:#e3eefb;color:#2b5fb3;border:1px solid #b3cdee}
+.sb-manual{background:#f0ebf7;color:#6a4a9e;border:1px solid #cabfe0}
+.ed{cursor:text;border-radius:4px;padding:1px 3px}
+.ed:hover{background:#f0f0f0;outline:1px dashed #c9c9c9}
+.ed.lock{cursor:not-allowed;color:#888}
+.flash{color:#2e7d32;font-size:11.5px;white-space:nowrap}
+table.t{width:100%;border-collapse:collapse;font-size:12.5px}
+.t th{text-align:left;font-size:11px;color:#8a8a8a;letter-spacing:.08em;padding:4px 8px;border-bottom:1.5px solid #ddd;white-space:nowrap}
+.t td{padding:6px 8px;border-bottom:1px solid #eee;vertical-align:top}
+.t tbody tr:hover td{background:#fafafa}
+.ghost td{color:#b5b5b5;background:#fbfbfb;font-style:italic}
+.ghost:hover td{background:#fbfbfb!important}
+.sum{display:block;max-width:460px}
+.tbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.tin{width:64px;border:1px solid #bbb;border-radius:5px;padding:3px 6px;font-size:12.5px}
+input.fi,textarea.fi{border:1px solid #bbb;border-radius:5px;padding:4px 8px;font-size:12.5px;width:100%;background:#fff}
+textarea.fi{resize:vertical;font-family:inherit}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:440px;max-width:92vw;background:#fff;border-left:2px solid #2b2b2b;box-shadow:-6px 0 18px rgba(0,0,0,.14);padding:14px 16px;overflow:auto;z-index:40}
+.pulse{display:inline-block;width:9px;height:9px;border-radius:50%;background:#2b5fb3;animation:pl 1s infinite alternate}
+@keyframes pl{from{opacity:.25}to{opacity:1}}
+#sw{position:fixed;left:50%;transform:translateX(-50%);bottom:14px;background:#2b2b2b;color:#fff;border-radius:999px;padding:6px 16px;display:flex;gap:14px;align-items:center;box-shadow:0 6px 18px rgba(0,0,0,.3);z-index:100;user-select:none;font-size:13px}
+#sw .ar{cursor:pointer;padding:0 6px;font-size:16px}
+#sw .ar:hover{color:#ffd76e}
+#toasts{position:fixed;left:14px;bottom:18px;display:flex;flex-direction:column;gap:6px;z-index:110;max-width:70vw}
+.toast{background:#2b2b2b;color:#fff;border-radius:6px;padding:6px 12px;font-size:12.5px;box-shadow:0 4px 12px rgba(0,0,0,.25);animation:tin .2s}
+@keyframes tin{from{transform:translateY(8px);opacity:0}}
+/* ── 三级体系通用：节奏/伏笔/状态点/键值行/进度段 ── */
+.beat{color:#b3543f;font-weight:700}
+.beat.star{color:#b8860b}
+.fs{display:inline-block;border-radius:999px;padding:0 7px;font-size:11px;margin:1px 3px 1px 0;border:1px solid;white-space:nowrap}
+.fs.p{color:#2b5fb3;border-color:#b3cdee;background:#f2f7fd}
+.fs.r{color:#2e7d32;border-color:#b4d8bc;background:#f0f7f1}
+.fs.o{color:#a85b12;border-color:#e8c790;background:#fdf6ea}
+.dot{font-size:10px}
+.dot.fin{color:#2e7d32}.dot.awa{color:#a85b12}.dot.pla{color:#2b5fb3}
+.kv{display:flex;gap:8px;margin:6px 0;align-items:baseline}
+.kv>b{flex:none;width:74px;font-size:11.5px;color:#8a8a8a;font-weight:600;letter-spacing:.05em}
+.seg{display:flex;height:8px;border-radius:4px;overflow:hidden;background:#eee;min-width:80px}
+.seg i{display:block;height:100%}
+.seg .s1{background:#7fb98a}.seg .s2{background:#e0a458}.seg .s3{background:#7aa5d8}.seg .s4{background:#e3e3e3}
+.planbox{border:1px dashed #b3cdee;border-radius:6px;padding:6px 10px;background:#f7fafe}
+.runbox{border:1px solid #b3cdee;border-radius:6px;padding:6px 10px;background:#f2f7fd}
+/* ── A：书脊树 ── */
+.twocol{flex:1;min-height:0;display:flex}
+.tree{flex:none;width:302px;border-right:1px solid #e2e2e2;overflow:auto;padding:8px 6px;background:#fdfdfd}
+.detail{flex:1;min-width:0;overflow:auto;padding:12px 16px}
+.tn{padding:4px 8px;border-radius:5px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px}
+.tn:hover{background:#f0f0f0}
+.tn.on{background:#2b2b2b;color:#fff}
+.tn.on .mut{color:#bbb}
+.tn.sp{font-weight:600;margin-bottom:4px}
+.tn.vl{font-weight:600;margin-top:6px;display:flex;gap:6px;align-items:baseline}
+.tn.ch{padding-left:26px;color:#444}
+.tn.gh{padding-left:26px;color:#7aa5d8;font-style:italic}
+.tn .mut{font-weight:400;font-size:11px}
+.caret{cursor:pointer;flex:none;width:14px;display:inline-block}
+/* ── B：卷轴泳道 ── */
+.spinebar{flex:none;border:1px solid #e2e2e2;border-radius:6px;background:#fdfaf2;padding:6px 12px;font-size:12.5px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap}
+.lanes{flex:1;min-height:0;display:flex;gap:10px;overflow-x:auto;padding:2px 2px 8px}
+.lane{flex:none;width:318px;border:1px solid #e2e2e2;border-radius:6px;background:#fdfdfd;display:flex;flex-direction:column;min-height:0}
+.lane .lh{padding:8px 10px;border-bottom:1px solid #eee;background:#fafafa;border-radius:6px 6px 0 0;flex:none}
+.lane .lb{flex:1;overflow:auto;padding:8px;display:flex;flex-direction:column;gap:8px}
+.lane .lf{padding:8px;border-top:1px dashed #e2e2e2;flex:none}
+.kcard{border:1px solid #ddd;border-left-width:4px;border-radius:5px;background:#fff;padding:6px 9px;cursor:pointer;font-size:12.5px}
+.kcard:hover{outline:2px solid #2b2b2b}
+.kcard.fresh{outline:2px solid #cabfe0}
+.kcard .cs{margin:3px 0;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;color:#666;font-size:12px}
+.shimmer{height:3px;background:linear-gradient(90deg,#7aa5d8,#dbe9f8,#7aa5d8);background-size:200% 100%;animation:shm 1.2s linear infinite;border-radius:2px;margin-top:6px}
+@keyframes shm{from{background-position:200% 0}to{background-position:-200% 0}}
+/* ── C：三级钻取 ── */
+.crumb{flex:none;display:flex;gap:8px;align-items:baseline;font-size:13px;padding:2px 4px}
+.crumb a{color:#2b5fb3;cursor:pointer;text-decoration:none}
+.crumb a:hover{text-decoration:underline}
+.hero{border:1.5px solid #2b2b2b;border-radius:8px;padding:12px 16px;background:#fff;flex:none}
+.vgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px}
+.vcard{border:1px solid #ddd;border-radius:8px;background:#fff;padding:10px 12px;cursor:pointer}
+.vcard:hover{outline:2px solid #2b2b2b}
+.ticks{display:flex;gap:3px;align-items:flex-end;flex-wrap:wrap;padding:6px 2px 16px}
+.tick{width:24px;height:26px;border-radius:4px;border:1px solid #ccc;position:relative;cursor:pointer;font-size:9.5px;display:flex;align-items:center;justify-content:center;color:#fff;flex:none}
+.tick.fin{background:#7fb98a;border-color:#7fb98a}
+.tick.awa{background:#e0a458;border-color:#e0a458}
+.tick.pla{background:#7aa5d8;border-color:#7aa5d8}
+.tick.none{background:#fff;color:#bbb;border-style:dashed}
+.tick .bm{position:absolute;bottom:-15px;left:50%;transform:translateX(-50%);font-size:10px}
+</style>
+</head>
+<body>
+<div class="meta">
+  <b>#30 原型 · 大纲规划视图 v2</b><span id="vname"></span><span id="vdesc"></span>
+  <span style="flex:1"></span>
+  <span>三级体系：总纲 → 卷纲 → 章纲（调研 §2）· 切换：←/→ · ?variant=A|B|C · throwaway 不进 main</span>
+</div>
+<div id="stage"></div>
+<div id="toasts"></div>
+<div id="sw">
+  <span class="ar" data-act="cycle" data-dir="-1">‹</span>
+  <span id="swlabel"></span>
+  <span class="ar" data-act="cycle" data-dir="1">›</span>
+</div>
+<script>
+'use strict';
+/* ───────────────────────── 变体切换 ───────────────────────── */
+const VARIANTS={A:'书脊树 · 层级导航 + 详情面板',B:'卷轴 · 横向卷带故事地图',C:'钻取 · 三级缩放（书→卷→章）'};
+const VDESC={
+  A:'—— 左树三级折叠（总纲/卷/章）+ 右详情；卷节点驱动规划（§2）',
+  B:'—— 总纲顶条 + 每卷一条泳道横滚；▲★ 节奏与伏笔 chip 空间里一眼扫（§6.2/§6.3）',
+  C:'—— 书级战略总览 → 卷级战术（节奏轨道+章表）→ 章抽屉；面包屑缩放（§九 八步流程）',
+};
+let V=new URLSearchParams(location.search).get('variant')||'A';
+if(!VARIANTS[V])V='A';
+function setV(v){V=v;history.replaceState(null,'','?variant='+v);render();}
+function cycle(d){const ks=Object.keys(VARIANTS);setV(ks[(ks.indexOf(V)+d+ks.length)%ks.length]);}
+
+/* ───────────────────────── 演示数据：三级大纲 ───────────────────────── */
+const SPINE={
+  logline:'渡口长大的林晚舟凭一张旧船票印记卷入二十年前沉船旧案，在小镇权贵的层层掩盖中查出母亲离镇的真相。',
+  conflict:'沉没的赈灾银两 × 小镇既得利益者的集体掩盖',
+  ending:'沉船案元凶伏法，母亲沉冤得雪，林晚舟接掌渡口船行，灯火重明。',
+  selling:'民国悬疑 × 渡口风情 × 今案/昔案双线交错',
+  world:'民国年间，江城渡口小镇：船行、灯市、更夫与往来客商构成的熟人社会',
+  golden:'母亲留下的手记与船票印记（信物线索型「金手指」，非系统 · §3.3）',
+};
+const VOLS=[
+  {id:1,name:'卷一 · 渡口灯火',size:10,goal:'立足小镇，揭开「沉船案」的存在',main:'林晚舟循船票印记追查母亲当年离镇真相，一步步逼近二十年前沉船旧案',sub:'与更夫赵三由互疑结为同盟；苏锦的账册交易暗线',cliff:'账册在灯市熄灯夜被调包——对手始终快一步'},
+  {id:2,name:'卷二 · 雾锁江城',size:15,goal:'溯江而上，坐实赈灾银两去向',main:'按母亲手记寻访当年账房与幸存者，拼出银两流向与经手人',sub:'查案官的三重身份；赵三的伤情与身世',cliff:'老韩承认自己是当年舵手，却拒不指认主使'},
+  {id:3,name:'卷三 · 归航',size:15,goal:'证据齐备，正面对决',main:'回镇与船行东家一系摊牌，当众揭开沉船夜真相',sub:'苏锦的去留抉择；渡口众人的站队',cliff:'卷末即全书结局，不再设悬念'},
+];
+const CH=(n,vol,title,summary,events,status,batch,x)=>({n,vol,title,summary,events,status,batch,
+  beat:(x&&x.beat)||'',fs:(x&&x.fs)||[],cast:(x&&x.cast)||[]});
+const S={
+  current:4,
+  chapters:[
+    CH(1,1,'雾夜摆渡人','林晚舟雨夜渡江，船夫老韩认出她腕上的旧船票印记，欲言又止；对岸灯市灯火如昼，她在渡口袋中发现一封写给「阿鸾」的信。',['林晚舟抵达渡口','老韩认出船票印记','发现写给阿鸾的信'],'finalized',1,{fs:[{t:'p',label:'船票印记'}],cast:['老韩']}),
+    CH(2,1,'灯市旧识','灯市上林晚舟寻信中人无果，却被绸缎庄老板娘苏锦认作故人之后；一盏失控的河灯引她撞见巡夜的更夫赵三。',['苏锦认出世故','河灯失控','初遇更夫赵三'],'finalized',1,{cast:['苏锦','赵三']}),
+    CH(3,1,'沉默的船票','老韩道出二十年前沉船旧事：那张船票属于没能上岸的人。林晚舟决定留下，查清母亲当年离镇的真相。',['沉船旧事浮出','船票来历揭晓','决意留镇查访'],'finalized',1,{beat:'▲',fs:[{t:'r',label:'船票印记'}],cast:['老韩']}),
+    CH(4,1,'渡口重逢','赵三深夜叩门，交还她遗落的信，信封夹层里竟有半张当年的航运图；两人第一次坐下来，交换各自掌握的碎片。',['赵三还信','夹层航运图现身','交换线索'],'awaiting',1,{fs:[{t:'p',label:'半张航运图'}],cast:['赵三']}),
+    CH(5,1,'暗流','航运图指向废弃的上游码头，林晚舟独自前往，发现有人先一步翻动过货仓，并在梁上留下警告的记号。',['独探废码头','货仓被翻动','警告记号'],'planned',1,{beat:'▲',fs:[{t:'o',label:'梁上警告记号'}]}),
+    CH(6,1,'灯下的交易','苏锦深夜约见，提出用当年账册交换那半张航运图；林晚舟假意应允，套出账册藏在灯市地窖。',['苏锦提出交易','假意应允','账册下落'],'planned',2,{cast:['苏锦']}),
+    CH(7,1,'失踪的更夫','赵三一夜未归，更锣弃在渡口；林晚舟循着锣槌上的新泥找到江边小屋，只见一桌未动的饭菜。',['赵三失踪','更锣弃置','江边小屋'],'planned',2,{cast:['赵三']}),
+    CH(8,1,'江心孤岛','老韩被迫说出江心孤岛的秘密：沉船幸存者曾被软禁于此。林晚舟夜渡登岛，在废屋里找到母亲的手记。',['孤岛秘密','夜渡登岛','母亲手记'],'planned',2,{beat:'▲',fs:[{t:'o',label:'母亲手记'}],cast:['老韩']}),
+    CH(9,1,'旧案重提','手记揭开沉船夜真相一角：有人为吞没赈灾银两动了手脚。苏锦的丈夫——已故船行东家——正是关键一环。',['沉船真相一角','赈灾银两','船行东家'],'planned',2,{fs:[{t:'r',label:'半张航运图'}],cast:['苏锦']}),
+    CH(10,1,'夜航西渡','林晚舟按手记指引寻找当年的账房先生，赵三带伤归来，二人在夜航船上交换身世，关系破冰。',['寻访账房先生','赵三带伤归来','身世破冰'],'planned',2,{beat:'★',cast:['赵三']}),
+    CH(11,2,'雾中来客','账房先生已疯癫，只反复念着「灯灭三次」。当夜灯市果然三次灭灯，第三次时，渡口来了位不速之客。',['疯癫账房','灯灭三次','不速之客'],'planned',3,{cast:['账房先生']}),
+    CH(12,2,'三重身份','不速之客自称省城查案官，却对航运图异常上心；赵三查出他同时持有船行与镖局两重旧身份。',['查案官到访','图谋航运图','三重旧身份'],'planned',3,{cast:['查案官','赵三']}),
+    CH(13,2,'灯熄时分','苏锦交出账册，条件是保她离开小镇；交接当夜灯市全面熄灯，账册在混乱中被调包。',['苏锦交册','灯市熄灭','账册调包'],'planned',3,{beat:'▲',cast:['苏锦']}),
+    CH(14,2,'水底信物','林晚舟潜回沉船旧址，打捞起母亲的银锁与真正的赈灾账底；老韩终于承认，自己当年是船上的舵手。',['打捞银锁','真账底出水','老韩认罪'],'planned',3,{cast:['老韩']}),
+    CH(15,2,'归航','证据齐备，查案官露出本来面目；渡口众人联手，在晨雾中截住即将离镇的船。',['证据齐备','真凶现形','晨雾截船'],'planned',3,{beat:'▲'}),
+  ],
+  batches:[
+    {id:1,range:[1,5],when:'7-15 21:40'},
+    {id:2,range:[6,10],when:'7-17 14:03'},
+    {id:3,range:[11,15],when:'7-18 09:52'},
+  ],
+  planRun:null,pre:null,
+  node:{kind:'spine'},
+  volOpen:{1:true,2:true,3:true},
+  drawer:null,
+  crumb:{level:'book'},
+  edit:null,flash:null,
+  freshBatch:null,
+  spineOpen:false,
+};
+const NEWCH={
+  11:{title:'雾中来客',summary:'账房先生已疯癫，只反复念着「灯灭三次」。当夜灯市果然三次灭灯，第三次时，渡口来了位不速之客。',events:['疯癫账房','灯灭三次','不速之客']},
+  12:{title:'三重身份',summary:'不速之客自称省城查案官，却对航运图异常上心；赵三查出他同时持有船行与镖局两重旧身份。',events:['查案官到访','图谋航运图','三重旧身份']},
+  13:{title:'灯熄时分',summary:'苏锦交出账册，条件是保她离开小镇；交接当夜灯市全面熄灯，账册在混乱中被调包。',events:['苏锦交册','灯市熄灭','账册调包']},
+  14:{title:'水底信物',summary:'林晚舟潜回沉船旧址，打捞起母亲的银锁与真正的赈灾账底；老韩终于承认，自己当年是船上的舵手。',events:['打捞银锁','真账底出水','老韩认罪']},
+  15:{title:'归航',summary:'证据齐备，查案官露出本来面目；渡口众人联手，在晨雾中截住即将离镇的船。',events:['证据齐备','真凶现形','晨雾截船']},
+};
+function gen(n){return{title:'新大纲 · 第'+n+'章',summary:'（演示数据）规划生成的第 '+n+' 章梗概：既有线索在此收束又放开，人物关系推进一格，并为后文埋下新的钩子。',events:['事件甲 · 推进','事件乙 · 转折','事件丙 · 钩子']};}
+
+/* ───────────────────────── 工具 ───────────────────────── */
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function toast(msg){const d=document.createElement('div');d.className='toast';d.textContent=msg;document.getElementById('toasts').appendChild(d);setTimeout(()=>d.remove(),2800);}
+function cnt(st){return S.chapters.filter(c=>c.status===st).length;}
+function gotoCh(n){toast('→ 工作区 · 第 '+n+' 章（写作｜评审｜修订 模式 tab · #19）—— 原型不跨页');}
+function volStart(v){let s=1;for(const x of VOLS){if(x.id===v.id)return s;s+=x.size;}return s;}
+function volEnd(v){return volStart(v)+v.size-1;}
+function volChaps(v){return S.chapters.filter(c=>c.vol===v.id);}
+function volLast(v){return Math.max(0,...volChaps(v).map(c=>c.n));}
+function nextStart(v){return Math.max(volLast(v)+1,volStart(v));}
+function volRemain(v){return volEnd(v)-nextStart(v)+1;}
+function stBadge(st){
+  if(st==='finalized')return '<span class="sbadge sb-done">已定稿</span>';
+  if(st==='awaiting')return '<span class="sbadge sb-partial">人工门</span>';
+  return '<span class="sbadge sb-decomp">已规划</span>';
+}
+function stDot(st){return '<span class="dot '+(st==='finalized'?'fin':st==='awaiting'?'awa':'pla')+'">'+(st==='finalized'?'●':st==='awaiting'?'◐':'○')+'</span>';}
+function bi(b){return b?'<span class="beat'+(b==='★'?' star':'')+'">'+b+'</span>':'';}
+function beatMark(b){return b==='★'?'<span class="beat star" title="卷级大高潮（§6.2 每卷两小一大）">★ 大高潮</span>':'<span class="beat" title="小高潮（§6.2 每 3–5 章一个）">▲ 小高潮</span>';}
+function fsChip(f){
+  if(f.t==='p')return '<span class="fs p" title="本章埋下的伏笔（§6.3 高潮处埋 2–3 个）">⬦ 伏笔 · '+esc(f.label)+'</span>';
+  if(f.t==='r')return '<span class="fs r" title="本章回收的伏笔">⬧ 回收 · '+esc(f.label)+'</span>';
+  return '<span class="fs o" title="已埋下、待回收（对应 L1 待回收伏笔表）">⬦ '+esc(f.label)+' · 待回收</span>';
+}
+function segHTML(v){
+  const chs=volChaps(v);
+  const fin=chs.filter(c=>c.status==='finalized').length,awa=chs.filter(c=>c.status==='awaiting').length;
+  const pla=chs.length-fin-awa,none=v.size-chs.length;
+  const pc=x=>(x/v.size*100)+'%';
+  return '<i class="s1" style="width:'+pc(fin)+'"></i><i class="s2" style="width:'+pc(awa)+'"></i><i class="s3" style="width:'+pc(pla)+'"></i><i class="s4" style="width:'+pc(none)+'"></i>';
+}
+function volBeats(v){
+  const chs=volChaps(v);
+  const x=chs.filter(c=>c.beat==='▲').length,st=chs.filter(c=>c.beat==='★').length;
+  const open=chs.reduce((a,c)=>a+c.fs.filter(f=>f.t==='o').length,0);
+  return{x,st,open};
+}
+
+/* ───────────────────────── 就地编辑（PATCH chapters / 人工卷纲总纲） ───────────────────────── */
+function startEdit(kind,id,field,idx){
+  S.edit={kind,id,field,idx};render();
+  const el=document.getElementById('ed');
+  if(el){el.focus();if(el.select)el.select();}
+}
+function commitEdit(ok){
+  const e=S.edit;if(!e)return;
+  S.edit=null;
+  if(ok){
+    const el=document.getElementById('ed');
+    const val=el?el.value.trim():'';
+    if(val){
+      let o=null;
+      if(e.kind==='ch')o=S.chapters.find(c=>c.n===e.id);
+      else if(e.kind==='vol')o=VOLS.find(x=>x.id===e.id);
+      else o=SPINE;
+      if(o){
+        if(e.field==='event')o.events[e.idx]=val;else o[e.field]=val;
+        S.flash={kind:e.kind,id:e.id,field:e.field,idx:e.idx};
+        setTimeout(()=>{S.flash=null;render();},1300);
+      }
+    }
+  }
+  render();
+}
+function edCell(kind,id,field,idx,text){
+  idx=(idx===undefined||idx===null)?null:idx;
+  const on=S.edit&&S.edit.kind===kind&&String(S.edit.id)===String(id)&&S.edit.field===field&&S.edit.idx===idx;
+  if(on){
+    if(field==='summary'||field==='logline'||field==='main'||field==='sub')return '<textarea id="ed" class="fi" rows="4">'+esc(text)+'</textarea>';
+    return '<input id="ed" class="fi" value="'+esc(text)+'">';
+  }
+  let locked=false,tip;
+  if(kind==='ch'){
+    const ch=S.chapters.find(c=>c.n===id);
+    locked=ch.status==='finalized';
+    tip=locked?'已定稿：章纲锁定（演示态语义，随本票裁决）':'点击就地编辑 · PATCH chapters 大纲字段（#22 · 单行写不编号）';
+  }else{
+    tip='点击就地编辑 · 人工所有 · 调研：核心骨架不轻易改动（§十 误区二）';
+  }
+  const fl=S.flash&&S.flash.kind===kind&&String(S.flash.id)===String(id)&&S.flash.field===field&&S.flash.idx===idx;
+  const da=locked?'':' data-act="edit" data-kind="'+kind+'" data-id="'+id+'" data-field="'+field+'" data-idx="'+(idx===null?'':idx)+'"';
+  return '<span class="ed'+(locked?' lock':'')+'" title="'+tip+'"'+da+'>'+esc(text)+'</span>'+(fl?'<span class="flash"> ✓已保存</span>':'');
+}
+function addEvent(n){const ch=S.chapters.find(c=>c.n===n);ch.events.push('新事件（点击编辑）');render();}
+function delEvent(n,i){const ch=S.chapters.find(c=>c.n===n);ch.events.splice(i,1);render();}
+
+/* ───────────────────────── 批量规划 Run 模拟（kind=plan · 卷语境） ───────────────────────── */
+let ptimer=null;
+function openPlan(vid){
+  const v=VOLS.find(x=>x.id===+vid);
+  S.pre={vol:v.id,start:nextStart(v),count:Math.min(10,volRemain(v))};
+  if(V==='A')S.node={kind:'vol',id:v.id};
+  render();
+}
+function startPlan(vid){
+  if(S.planRun)return toast('已有活跃规划 Run · 同书互斥（#22 · 409）');
+  const v=VOLS.find(x=>x.id===vid);
+  const st=+document.getElementById('pf-s').value,ct=+document.getElementById('pf-c').value;
+  if(!(ct>=5&&ct<=50))return toast('章数范围 5–50（Planner 批量能力）');
+  if(st<volStart(v)||st+ct-1>volEnd(v))return toast('范围须落在本卷内（'+volStart(v)+'–'+volEnd(v)+'）· 扩卷/跨卷语义待裁决');
+  S.pre=null;S.planRun={vol:v.id,start:st,count:ct,mode:st>volLast(v)?'append':'replan'};
+  render();
+  ptimer=setTimeout(completePlan,3000);
+}
+function cancelPlan(){
+  if(!S.planRun)return;
+  clearTimeout(ptimer);S.planRun=null;
+  toast('已取消 · 终态 cancelled · 无改动落库（plan Run 无部分稿 · #21）');
+  render();
+}
+function completePlan(){
+  const p=S.planRun;if(!p)return;
+  S.planRun=null;
+  if(p.mode==='replan'){
+    S.chapters=S.chapters.filter(c=>!(c.status==='planned'&&c.n>=p.start&&c.n<p.start+p.count));
+    S.batches=S.batches.filter(b=>S.chapters.some(c=>c.batch===b.id));
+  }
+  const bid=Math.max(0,...S.batches.map(b=>b.id))+1;
+  for(let i=0;i<p.count;i++){
+    const n=p.start+i,t=NEWCH[n]||gen(n);
+    S.chapters.push(CH(n,p.vol,t.title,t.summary,t.events.slice(),'planned',bid,{}));
+  }
+  S.chapters.sort((a,b)=>a.n-b.n);
+  S.batches.push({id:bid,range:[p.start,p.start+p.count-1],when:'刚刚'});
+  S.freshBatch=bid;
+  toast('规划完成 · '+p.count+' 章大纲已入库（T9→T2 · total_chapters 更新）· Run 终态 awaiting_human，待人过目');
+  render();
+}
+function preReplan(n){
+  const ch=S.chapters.find(c=>c.n===n),v=VOLS.find(x=>x.id===ch.vol);
+  S.drawer=null;
+  S.pre={vol:v.id,start:n,count:volLast(v)-n+1};
+  if(V==='A')S.node={kind:'vol',id:v.id};
+  if(V==='C')S.crumb={level:'vol',vol:v.id};
+  toast('已预填重规划范围：第 '+n+' 章起 · 覆盖范围内未开工章 · 确认后 ▶');
+  render();
+}
+function planFormHTML(v){
+  const st=S.pre?S.pre.start:nextStart(v);
+  const ct=S.pre?S.pre.count:Math.min(10,volRemain(v));
+  const repl=st<=volLast(v);
+  return '<div class="tbar planbox"><b>✦ 规划章纲 · '+esc(v.name)+'</b>'
+    +'起始章 <input id="pf-s" class="tin" type="number" min="'+volStart(v)+'" max="'+volEnd(v)+'" value="'+st+'">'
+    +'章数 <input id="pf-c" class="tin" type="number" min="5" max="50" value="'+ct+'">'
+    +'<span class="btn pri" data-act="submit-plan" data-vol="'+v.id+'">▶ 发起 plan Run</span>'
+    +'<span class="btn" data-act="cancel-pre">取消</span>'
+    +'<span class="hint" style="flex-basis:100%">5–50 章/批 · 本卷 '+volStart(v)+'–'+volEnd(v)+' 章 · 已排至 '+(volLast(v)||'—')+' · 卷内剩余 '+volRemain(v)+' 章'
+    +(repl?' · <b style="color:#a85b12">起始落在已排区 = 重规划：覆盖范围内未开工章的既有大纲</b>':' · 起点在已排末章之后 = 续排追加')
+    +' · novel 级 kind=plan · 同书仅一活跃 Run（#21/#22 · 409）</span></div>';
+}
+function runPanelHTML(){
+  const p=S.planRun,v=VOLS.find(x=>x.id===p.vol);
+  return '<div class="tbar runbox"><span class="pulse"></span><b>规划中…</b>'+esc(v.name)+' · 第 '+p.start+'–'+(p.start+p.count-1)+' 章 · '+p.count+' 章 · phase: planning'
+    +'<span class="btn dan" data-act="cancel-run">■ 取消</span>'
+    +'<span class="hint">SSE phase 事件 · 取消=终态 cancelled、无改动落库（#21）· 完成后 T9→T2 入库、Run 终态 awaiting_human 待人过目</span></div>';
+}
+
+/* ───────────────────────── 共享卡片：总纲 / 卷纲 / 章纲 ───────────────────────── */
+function statsLine(){
+  return '<div class="hint">《渡口灯火》 · 3 卷 · 预计 40 章 · 已排章纲 '+S.chapters.length+' · 已定稿 '+cnt('finalized')+' · 人工门 '+cnt('awaiting')+' · 当前第 '+S.current+' 章'
+    +' <span class="mut">—— 演示规模≈真实百万字 1/10（§6.1：百万字 5–10 卷、每卷 15–50 万字）</span></div>';
+}
+function spineDetailHTML(){
+  return '<h3 style="margin:2px 0 4px">📕 总纲 · 《渡口灯火》</h3>'
+    +'<div class="hint">总纲 · 1000–5000 字（§2 第一级）· 核心骨架不轻易改动（§十）· 人工所有 '
+    +'<span class="btn" style="padding:1px 8px" data-act="ai-draft">✦ AI 起草/润色</span></div>'
+    +'<div class="kv" style="align-items:flex-start"><b>一句话主线</b><span style="flex:1">'+edCell('spine','spine','logline',null,SPINE.logline)+'</span></div>'
+    +'<div class="kv"><b>核心矛盾</b><span>'+edCell('spine','spine','conflict',null,SPINE.conflict)+'</span></div>'
+    +'<div class="kv"><b>结局</b><span>'+edCell('spine','spine','ending',null,SPINE.ending)+' <span class="hint">先定结局再反推（§3.6 反推法）</span></span></div>'
+    +'<div class="kv"><b>类型/卖点</b><span>'+edCell('spine','spine','selling',null,SPINE.selling)+'</span></div>'
+    +'<div class="kv"><b>世界背景</b><span>'+edCell('spine','spine','world',null,SPINE.world)+'</span></div>'
+    +'<div class="kv"><b>金手指</b><span>'+edCell('spine','spine','golden',null,SPINE.golden)+'</span></div>';
+}
+function volDetailHTML(v){
+  const chs=volChaps(v),fin=chs.filter(c=>c.status==='finalized').length,awa=chs.filter(c=>c.status==='awaiting').length;
+  const bt=volBeats(v);
+  let h='<h3 style="margin:2px 0 4px">'+esc(v.name)+'</h3>'
+    +'<div class="hint">卷纲 · 每卷 200–500 字（§2 第二级）· 人工可改 '
+    +'<span class="btn" style="padding:1px 8px" data-act="ai-draft">✦ AI 起草卷纲</span></div>'
+    +'<div class="kv" style="align-items:flex-start"><b>阶段目标</b><span style="flex:1">'+edCell('vol',v.id,'goal',null,v.goal)+'</span></div>'
+    +'<div class="kv" style="align-items:flex-start"><b>本卷主线</b><span style="flex:1">'+edCell('vol',v.id,'main',null,v.main)+'</span></div>'
+    +'<div class="kv" style="align-items:flex-start"><b>支线/感情线</b><span style="flex:1">'+edCell('vol',v.id,'sub',null,v.sub)+'</span></div>'
+    +'<div class="kv" style="align-items:flex-start"><b>卷末悬念</b><span style="flex:1">'+edCell('vol',v.id,'cliff',null,v.cliff)+'</span></div>'
+    +'<div class="kv"><b>规模/进度</b><span>'+volStart(v)+'–'+volEnd(v)+' 章 · 已排 '+chs.length+' · 定稿 '+fin+' · 人工门 '+awa+'</span>'
+    +'<span class="seg" style="width:140px">'+segHTML(v)+'</span></div>'
+    +'<div class="kv"><b>节奏/伏笔</b><span>▲ '+bt.x+' · ★ '+bt.st+' <span class="mut">（§6.2 每卷两小一大）</span> · 待回收伏笔 '+bt.open+' <span class="mut">（§6.3 → L1 待回收伏笔表）</span></span></div>';
+  if(S.planRun&&S.planRun.vol===v.id)h+='<div style="margin-top:8px">'+runPanelHTML()+'</div>';
+  else if(!S.planRun&&S.pre&&S.pre.vol===v.id)h+='<div style="margin-top:8px">'+planFormHTML(v)+'</div>';
+  else if(!S.planRun&&volRemain(v)>0)h+='<div style="margin-top:8px"><span class="btn pri" data-act="open-plan" data-vol="'+v.id+'">✦ '+(chs.length?'续排':'起排')+'本卷章纲</span> <span class="hint">Planner 批量产出（5–50 章/批）· 范围须落卷内，扩卷/跨卷语义待裁决</span></div>';
+  else if(!S.planRun)h+='<div class="hint" style="margin-top:8px">本卷已排满 · 重规划从章级 ↻ 进入；扩卷语义待裁决</div>';
+  return h;
+}
+function chDetailHTML(ch){
+  const locked=ch.status==='finalized';
+  const v=VOLS.find(x=>x.id===ch.vol);
+  return '<div class="kv"><b>定位</b><span>'+esc(v.name)+' · 第 '+ch.n+' 章 '+stBadge(ch.status)+(ch.batch===S.freshBatch?' <span class="sbadge sb-manual">新 · 待过目</span>':'')+'</span></div>'
+    +'<div class="kv"><b>标题</b><span>'+edCell('ch',ch.n,'title',null,ch.title)+'</span></div>'
+    +'<div class="kv" style="align-items:flex-start"><b>梗概</b><span style="flex:1">'+edCell('ch',ch.n,'summary',null,ch.summary)+'</span></div>'
+    +'<div class="kv" style="align-items:flex-start"><b>关键事件</b><span style="flex:1">'
+    +ch.events.map((e,i)=>'<div>• '+edCell('ch',ch.n,'event',i,e)+(locked?'':' <span class="btn" style="padding:0 6px" data-act="del-event" data-n="'+ch.n+'" data-idx="'+i+'">×</span>')+'</div>').join('')
+    +(locked?'':'<span class="btn" data-act="add-event" data-n="'+ch.n+'">+ 事件</span>')+'</span></div>'
+    +'<div class="kv"><b>出场人物</b><span>POV 林晚舟'+(ch.cast.length?' · 出场 '+ch.cast.join('、'):'')+' <span class="hint">（ChapterOutline.pov / involved）</span></span></div>'
+    +'<div class="kv"><b>节奏/伏笔</b><span>'+(ch.beat?beatMark(ch.beat)+' ':'')+(ch.fs.length?ch.fs.map(fsChip).join(''):'<span class="mut">无</span>')+'</span></div>'
+    +'<div style="margin-top:10px"><span class="btn pri" data-act="goto" data-n="'+ch.n+'">→ 进入写作台</span> '
+    +(ch.status==='planned'&&!S.planRun?'<span class="btn" data-act="replan" data-n="'+ch.n+'">↻ 从本章起重规划</span>':'')
+    +(locked?'<span class="hint"> 🔒 已定稿：锁定且不参与重规划（演示态）</span>':'')+'</div>'
+    +'<div class="hint" style="margin-top:8px">编辑即保存 · PATCH /api/novels/{id}/chapters/{n} 大纲字段 · 单行写不编号（#22）· 活跃 Run 期间拒（409）</div>';
+}
+
+/* ───────────────────────── 变体 A：书脊树 ───────────────────────── */
+function treeHTML(){
+  let h='<div class="tn sp'+(S.node.kind==='spine'?' on':'')+'" data-act="sel-spine">📕 总纲 · 《渡口灯火》</div>';
+  for(const v of VOLS){
+    const chs=volChaps(v),fin=chs.filter(c=>c.status==='finalized').length;
+    const open=S.volOpen[v.id]!==false;
+    h+='<div class="tn vl'+(S.node.kind==='vol'&&S.node.id===v.id?' on':'')+'">'
+      +'<span class="caret" data-act="tog-vol" data-id="'+v.id+'">'+(open?'▾':'▸')+'</span>'
+      +'<span style="flex:1" data-act="sel-vol" data-id="'+v.id+'">'+esc(v.name)+'</span>'
+      +'<span class="mut">'+fin+'/'+v.size+'</span></div>';
+    if(open){
+      for(const c of chs){
+        h+='<div class="tn ch'+(S.node.kind==='ch'&&S.node.id===c.n?' on':'')+'" data-act="sel-ch" data-id="'+c.n+'">'
+          +stDot(c.status)+' '+c.n+' '+esc(c.title)+' '+bi(c.beat)
+          +(c.fs.some(f=>f.t==='o')?' <span class="fs o" style="padding:0 4px">伏</span>':'')
+          +(c.batch===S.freshBatch?' <span class="sbadge sb-manual">新</span>':'')+'</div>';
+      }
+      if(volRemain(v)>0&&!S.planRun){
+        h+='<div class="tn gh" data-act="open-plan" data-vol="'+v.id+'">✦ '+(chs.length?'续排':'起排')+'本卷章纲（'+nextStart(v)+'–'+volEnd(v)+'）</div>';
+      }
+    }
+  }
+  return h;
+}
+function nodeDetailA(){
+  const nd=S.node;
+  if(nd.kind==='vol')return volDetailHTML(VOLS.find(x=>x.id===nd.id));
+  if(nd.kind==='ch'){const ch=S.chapters.find(c=>c.n===nd.id);if(ch)return chDetailHTML(ch);}
+  return spineDetailHTML();
+}
+function renderA(){
+  return '<div class="twocol"><div class="tree">'+treeHTML()+'</div><div class="detail">'
+    +statsLine()+(S.planRun?runPanelHTML():'')+nodeDetailA()+'</div></div>';
+}
+
+/* ───────────────────────── 变体 B：卷轴泳道 ───────────────────────── */
+function spinebarB(){
+  let h='<div class="spinebar"><b>📕 总纲</b>'
+    +'<span><span class="mut">主线</span> '+esc(SPINE.logline.slice(0,36))+'…</span>'
+    +'<span>→ <span class="mut">矛盾</span> '+esc(SPINE.conflict)+'</span>'
+    +'<span>→ <span class="mut">结局</span> '+esc(SPINE.ending.slice(0,16))+'…</span>'
+    +'<span style="flex:1"></span><span class="btn" data-act="spine-toggle">'+(S.spineOpen?'收起 ▴':'展开总纲 ▾')+'</span></div>';
+  if(S.spineOpen)h+='<div class="hero" style="border-width:1px">'+spineDetailHTML()+'</div>';
+  return h;
+}
+function kcardB(c){
+  const border=c.status==='finalized'?'#7fb98a':c.status==='awaiting'?'#e0a458':'#7aa5d8';
+  return '<div class="kcard'+(c.batch===S.freshBatch?' fresh':'')+'" style="border-left-color:'+border+'" data-act="drawer" data-n="'+c.n+'">'
+    +'<div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline"><b>'+c.n+' · '+esc(c.title)+'</b><span>'+bi(c.beat)+'</span></div>'
+    +'<div class="cs">'+esc(c.summary)+'</div>'
+    +'<div>'+stBadge(c.status)+(c.batch===S.freshBatch?' <span class="sbadge sb-manual">新</span>':'')+c.fs.map(fsChip).join('')+'</div></div>';
+}
+function laneB(v){
+  const chs=volChaps(v),fin=chs.filter(c=>c.status==='finalized').length;
+  const running=S.planRun&&S.planRun.vol===v.id;
+  let h='<div class="lane"><div class="lh"><div style="display:flex;justify-content:space-between;gap:6px;align-items:baseline"><b>'+esc(v.name)+'</b><span class="mut" style="font-size:11px">'+fin+'/'+v.size+' 定稿</span></div>'
+    +'<div style="font-size:11.5px;color:#666;margin-top:2px">目标：'+esc(v.goal)+'</div>'
+    +'<div style="font-size:11.5px;color:#a85b12">悬念：'+esc(v.cliff)+'</div>'
+    +'<div class="seg" style="margin-top:5px">'+segHTML(v)+'</div>'
+    +(running?'<div class="shimmer"></div>':'')+'</div><div class="lb">';
+  h+=chs.map(kcardB).join('');
+  if(!chs.length)h+='<div class="mut" style="text-align:center;padding:14px 0;font-size:12px">仅卷纲 · 尚无章纲</div>';
+  h+='</div><div class="lf">'
+    +(running?'<span class="hint">规划中… </span><span class="btn dan" data-act="cancel-run">■ 取消</span>'
+      :(S.pre&&S.pre.vol===v.id?planFormHTML(v)
+      :(volRemain(v)>0?'<span class="btn" style="display:block;text-align:center" data-act="open-plan" data-vol="'+v.id+'">✦ '+(chs.length?'续排（'+nextStart(v)+'–'+volEnd(v)+'）':'起排本卷章纲')+'</span>'
+      :'<span class="hint">已排满 · 从章卡 ↻ 重规划</span>')))
+    +'</div></div>';
+  return h;
+}
+function renderB(){
+  let h=statsLine()+spinebarB()+(S.planRun?runPanelHTML():'')+'<div class="lanes">';
+  for(const v of VOLS)h+=laneB(v);
+  h+='<div class="lane" style="border-style:dashed;cursor:pointer" data-act="new-vol"><div class="mut" style="margin:auto;text-align:center;padding:30px 10px">＋ 新卷<br><span style="font-size:11px">卷纲先行（§九 第六步）<br>人工/AI 起草四字段后再排章纲</span></div></div></div>';
+  return h;
+}
+
+/* ───────────────────────── 变体 C：三级钻取 ───────────────────────── */
+function renderC(){
+  const lv=S.crumb;
+  let h='<div class="crumb"><a data-act="crumb-book">《渡口灯火》</a>'
+    +(lv.level==='vol'?'<span class="mut">/</span><b>'+esc(VOLS.find(x=>x.id===lv.vol).name)+'</b>':'')
+    +'<span style="flex:1"></span><span class="hint">书 → 卷 → 章 三级钻取（§2）</span></div>';
+  h+=statsLine();
+  if(S.planRun)h+=runPanelHTML();
+  h+=lv.level==='vol'?volC(VOLS.find(x=>x.id===lv.vol)):bookC();
+  return h;
+}
+function bookC(){
+  let h='<div class="hero">'+spineDetailHTML()+'</div>';
+  h+='<h4 style="margin:12px 0 6px">分卷 · '+VOLS.length+' 卷 <span class="hint" style="font-weight:400">（§九 第六步：总纲拆 5–10 卷，卷间悬念衔接 · 点击进卷）</span></h4><div class="vgrid">';
+  for(const v of VOLS){
+    const chs=volChaps(v),fin=chs.filter(c=>c.status==='finalized').length,bt=volBeats(v);
+    h+='<div class="vcard" data-act="crumb-vol" data-vol="'+v.id+'">'
+      +'<div style="display:flex;justify-content:space-between;align-items:baseline"><b>'+esc(v.name)+'</b><span class="mut" style="font-size:11px">'+volStart(v)+'–'+volEnd(v)+' 章</span></div>'
+      +'<div style="font-size:12px;color:#666;margin:4px 0">'+esc(v.goal)+'</div>'
+      +'<div class="seg">'+segHTML(v)+'</div>'
+      +'<div style="font-size:11px;color:#999;margin-top:4px">定稿 '+fin+' · 已排 '+chs.length+'/'+v.size+' · ▲'+bt.x+' ★'+bt.st+' · 待回收伏笔 '+bt.open+'</div></div>';
+  }
+  h+='<div class="vcard" style="border-style:dashed;display:flex;align-items:center;justify-content:center;color:#999" data-act="new-vol">＋ 新卷（卷纲先行）</div></div>';
+  return h;
+}
+function volC(v){
+  let h='<div class="hero" style="border-width:1px">'+volDetailHTML(v)+'</div>';
+  h+='<div class="b" style="flex:none"><h4>节奏轨道 · ▲ 小高潮（每 3–5 章）★ 卷末大高潮（§6.2）· 点格进章</h4><div class="ticks">';
+  for(let n=volStart(v);n<=volEnd(v);n++){
+    const c=S.chapters.find(x=>x.n===n);
+    if(c){
+      const cls=c.status==='finalized'?'fin':c.status==='awaiting'?'awa':'pla';
+      h+='<div class="tick '+cls+'" title="第 '+n+' 章 · '+esc(c.title)+'" data-act="drawer" data-n="'+n+'">'+n+(c.beat?'<span class="bm beat'+(c.beat==='★'?' star':'')+'">'+c.beat+'</span>':'')+'</div>';
+    }else{
+      h+='<div class="tick none" title="第 '+n+' 章 · 未规划" data-act="tick-unplanned">'+n+'</div>';
+    }
+  }
+  h+='</div></div>';
+  h+='<div class="b" style="flex:1;overflow:auto"><h4>章纲 · 点击文字就地编辑（已定稿锁定）· 详情/事件进抽屉</h4><table class="t"><thead><tr><th>#</th><th>标题</th><th>梗概</th><th>节奏/伏笔</th><th>状态</th><th>操作</th></tr></thead><tbody>'
+    +volChaps(v).map(rowC).join('')
+    +(volRemain(v)>0?'<tr class="ghost"><td>'+nextStart(v)+'–</td><td colspan="5">此后章节未规划 · 由 Planner 批量产出（T2），无手工新建</td></tr>':'')
+    +'</tbody></table></div>';
+  return h;
+}
+function rowC(c){
+  return '<tr><td>'+c.n+'</td><td style="width:140px">'+edCell('ch',c.n,'title',null,c.title)+'</td>'
+    +'<td><span class="sum">'+edCell('ch',c.n,'summary',null,c.summary)+'</span></td>'
+    +'<td style="white-space:nowrap">'+bi(c.beat)+' '+c.fs.map(fsChip).join('')+'</td>'
+    +'<td>'+stBadge(c.status)+(c.batch===S.freshBatch?' <span class="sbadge sb-manual">新</span>':'')+'</td>'
+    +'<td style="white-space:nowrap"><span class="btn" data-act="drawer" data-n="'+c.n+'">详情</span><span class="btn" data-act="goto" data-n="'+c.n+'">→ 写作台</span>'
+    +(c.status==='planned'?'<span class="btn" title="从本章起重规划" data-act="replan" data-n="'+c.n+'">↻</span>':(c.status==='finalized'?'<span class="mut" title="已定稿不参与重规划">🔒</span>':''))
+    +'</td></tr>';
+}
+function drawerHTML(){
+  const ch=S.chapters.find(c=>c.n===S.drawer);if(!ch)return'';
+  return '<div class="drawer"><div class="tbar" style="justify-content:space-between"><b>第 '+ch.n+' 章 · '+esc(ch.title)+'</b><span class="btn" data-act="drawer-close">×</span></div>'
+    +'<div style="margin-top:8px">'+chDetailHTML(ch)+'</div></div>';
+}
+
+/* ───────────────────────── 事件委派 / 壳与渲染 ───────────────────────── */
+document.addEventListener('click',e=>{
+  const el=e.target.closest('[data-act]');
+  if(!el)return;
+  const d=el.dataset;
+  switch(d.act){
+    case 'cycle':cycle(+d.dir);break;
+    case 'sel-spine':S.node={kind:'spine'};render();break;
+    case 'tog-vol':S.volOpen[d.id]=S.volOpen[d.id]===false;render();break;
+    case 'sel-vol':S.node={kind:'vol',id:+d.id};render();break;
+    case 'sel-ch':S.node={kind:'ch',id:+d.id};render();break;
+    case 'goto':gotoCh(+d.n);break;
+    case 'open-plan':openPlan(d.vol);break;
+    case 'submit-plan':startPlan(+d.vol);break;
+    case 'cancel-pre':S.pre=null;render();break;
+    case 'cancel-run':cancelPlan();break;
+    case 'replan':preReplan(+d.n);break;
+    case 'drawer':S.drawer=+d.n;render();break;
+    case 'drawer-close':S.drawer=null;render();break;
+    case 'crumb-book':S.crumb={level:'book'};S.pre=null;render();break;
+    case 'crumb-vol':S.crumb={level:'vol',vol:+d.vol};render();break;
+    case 'spine-toggle':S.spineOpen=!S.spineOpen;render();break;
+    case 'new-vol':toast('新卷 = 卷纲先行：人工/AI 起草卷纲四字段（主线/支线/阶段目标/卷末悬念），再排章纲 · 待裁决');break;
+    case 'ai-draft':toast('总纲/卷纲的 AI 起草 = Planner 能力扩展（现仅产章纲）· 待裁决成票');break;
+    case 'tick-unplanned':toast('未规划 · 章节由 Planner 批量产出（T2），无手工新建');break;
+    case 'edit':startEdit(d.kind,isNaN(+d.id)?d.id:+d.id,d.field,d.idx===''?null:+d.idx);break;
+    case 'add-event':addEvent(+d.n);break;
+    case 'del-event':delEvent(+d.n,+d.idx);break;
+  }
+});
+document.addEventListener('focusout',e=>{
+  if(e.target&&e.target.id==='ed')commitEdit(true);
+});
+document.addEventListener('keydown',e=>{
+  const t=e.target;
+  if(t&&t.id==='ed'){
+    if(e.key==='Escape')commitEdit(false);
+    else if(e.key==='Enter'&&t.tagName==='INPUT')commitEdit(true);
+    return;
+  }
+  if(t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'||t.isContentEditable))return;
+  if(e.key==='Escape'){
+    if(S.drawer){S.drawer=null;render();}
+    else if(S.pre){S.pre=null;render();}
+    return;
+  }
+  if(e.key==='ArrowLeft')cycle(-1);
+  if(e.key==='ArrowRight')cycle(1);
+});
+function rail(){
+  return '<div class="rail">'
+    +'<div class="rni" title="工作区">✍<small>工作区</small></div>'
+    +'<div class="rni on" title="大纲">🧭<small>大纲</small></div>'
+    +'<div class="rni" title="素材">🗂<small>素材</small></div>'
+    +'<div class="rni" title="系统">⚙<small>系统</small></div></div>';
+}
+function render(){
+  document.getElementById('vname').textContent=V+' — '+VARIANTS[V];
+  document.getElementById('vdesc').textContent=VDESC[V];
+  document.getElementById('swlabel').textContent=V+' — '+VARIANTS[V];
+  document.getElementById('stage').innerHTML='<div class="shell">'+rail()+'<div class="main">'
+    +(V==='A'?renderA():V==='B'?renderB():renderC())+'</div></div>'+(S.drawer?drawerHTML():'');
+}
+render();
+</script>
+</body>
+</html>

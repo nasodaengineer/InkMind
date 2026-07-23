@@ -355,9 +355,7 @@ class TestRevertNotSwallowed:
         # 改回旧文（与 v1 相同内容）
         second_digest = compute_content_digest(second_content)
         async with uow.transaction():
-            result = await uow.t12_manual_edit(
-                chapter_id, ORIGINAL_CONTENT, second_digest
-            )
+            result = await uow.t12_manual_edit(chapter_id, ORIGINAL_CONTENT, second_digest)
             await uow._session.commit()
 
         # 验证：不被吞掉，版本正常递增
@@ -387,9 +385,7 @@ class TestRevertNotSwallowed:
         # T12 手动编辑相同内容 → 不被 T1 去重吞掉
         base_digest = compute_content_digest(ORIGINAL_CONTENT)
         async with uow.transaction():
-            result = await uow.t12_manual_edit(
-                chapter_id, ORIGINAL_CONTENT, base_digest
-            )
+            result = await uow.t12_manual_edit(chapter_id, ORIGINAL_CONTENT, base_digest)
             await uow._session.commit()
 
         assert result.version == 2
