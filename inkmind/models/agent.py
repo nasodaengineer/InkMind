@@ -230,15 +230,40 @@ class VerdictPayload(BaseModel):
     )
 
 
+class QuoteContext(BaseModel):
+    """锚定引文的上下文窗口。"""
+
+    prefix: str = Field(default="", max_length=64)
+    suffix: str = Field(default="", max_length=64)
+
+
+class AnnotationRef(BaseModel):
+    """批注线程的 wire 视图，随修订协议流转。"""
+
+    thread_id: UUID
+    intent: str
+    status: str
+    anchored_quote: str = Field(default="", description="锚定引文原文（无锚时为空）")
+    quote_context: QuoteContext = Field(default_factory=QuoteContext)
+    comments: list[str] = Field(default_factory=list, description="评语正文列表")
+
+
 class RevisionRequestPayload(BaseModel):
-    """向 Writer 发出的修订请求。"""
+    """向 Writer 发出的修订请求。issues 与 annotations 至少其一非空。"""
 
     novel_id: UUID
     chapter_index: int
     previous_content: str = Field(..., description="上一版草稿")
-    issues: list[str] = Field(min_length=1, description="需要修改的问题列表")
+    issues: list[str] = Field(default_factory=list, description="需要修改的问题列表")
+    annotations: list[AnnotationRef] = Field(
+        default_factory=list, description="人工批示批注（五区序列化源）"
+    )
     iteration: int = Field(ge=1, description="修订迭代次数")
     chapter_outline: ChapterOutline
+
+    def model_post_init(self, __context) -> None:
+        if not self.issues and not self.annotations:
+            raise ValueError("issues 与 annotations 至少其一非空")
 
 
 # ── 记忆持久化 ──
