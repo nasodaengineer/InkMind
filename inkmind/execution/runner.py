@@ -116,6 +116,8 @@ class RunLoop:
         if self._check_cancelled():
             return
 
+        assert self._uow.runs is not None
+
         # 获取 Run 记录
         run = await self._uow.runs.get_by_id(self._run_id)
         if run is None:
@@ -309,6 +311,9 @@ class RunLoop:
         if params.volume_id is None:
             raise ValueError("draft_volume 需要 volume_id")
 
+        assert self._uow.spines is not None
+        assert self._uow.volumes is not None
+
         spine = await self._uow.spines.get_by_novel(novel_id)
         if spine is None:
             raise ValueError("总纲不存在，请先起草总纲")
@@ -347,6 +352,9 @@ class RunLoop:
         self, novel_id: UUID, planner: PlannerService, params: PlanParams
     ) -> None:
         """LLM 拆卷 → T2b 批量创建卷。"""
+        assert self._uow.spines is not None
+        assert self._uow.volumes is not None
+
         spine = await self._uow.spines.get_by_novel(novel_id)
         if spine is None:
             raise ValueError("总纲不存在，请先起草总纲")
@@ -394,6 +402,10 @@ class RunLoop:
         """LLM 批量排章 → T2c 保存。"""
         if params.volume_id is None:
             raise ValueError("plan_chapters 需要 volume_id")
+
+        assert self._uow.spines is not None
+        assert self._uow.volumes is not None
+        assert self._uow.chapters is not None
 
         spine = await self._uow.spines.get_by_novel(novel_id)
         if spine is None:
@@ -522,6 +534,8 @@ class RunLoop:
 
     async def _do_checkpoint(self) -> None:
         """将 partial_content 写入数据库。"""
+        assert self._uow.runs is not None
+
         run = await self._uow.runs.get_by_id(self._run_id)
         if run is None:
             return

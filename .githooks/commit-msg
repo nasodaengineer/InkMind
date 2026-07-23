@@ -1,0 +1,25 @@
+#!/bin/sh
+# ADR-0012: 提交信息格式校验
+# 格式: <type>: <摘要>（#<issue>）
+# type: feat|fix|docs|chore|refactor|test|prototype|merge
+
+commit_msg_file="$1"
+msg=$(head -1 "$commit_msg_file")
+
+# 跳过 merge commit 和 revert
+case "$msg" in
+  Merge*|Revert*) exit 0 ;;
+esac
+
+pattern='^(feat|fix|docs|chore|refactor|test|prototype|merge): .+（#[0-9]+）$'
+
+if ! echo "$msg" | grep -qP "$pattern"; then
+  echo "❌ 提交信息格式不符合 ADR-0012 规范"
+  echo ""
+  echo "  期望: <type>: <中文摘要>（#<issue>）"
+  echo "  type: feat|fix|docs|chore|refactor|test|prototype|merge"
+  echo "  示例: feat: 写作台生成闭环（#37）"
+  echo ""
+  echo "  实际: $msg"
+  exit 1
+fi

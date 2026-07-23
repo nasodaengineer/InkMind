@@ -39,12 +39,16 @@ class DatabaseManager:
             self._session_factory = _session_factory
             return
 
-        path = db_path or os.getenv("INKMIND_DB", "inkmind.db")
+        if db_path is not None:
+            path = db_path
+        else:
+            path = os.getenv("INKMIND_DB", "inkmind.db")
         db_dir = Path(path).parent
         if db_dir.name:
             db_dir.mkdir(parents=True, exist_ok=True)
 
         # 检测 :memory: 共享内存模式（aiosqlite 每连接独立，需共享缓存）
+        poolclass: type[StaticPool] | type[NullPool]
         if path == ":memory:" or path == "file::memory:":
             db_url = "sqlite+aiosqlite:///file::memory:?cache=shared&mode=memory&uri=true"
             poolclass = StaticPool
@@ -225,6 +229,7 @@ class DatabaseManager:
     @asynccontextmanager
     async def session(self) -> AsyncIterator[AsyncSession]:
         """获取一个异步会话。"""
+        assert self._session_factory is not None
         async with self._session_factory() as session:
             try:
                 yield session
@@ -242,6 +247,7 @@ class DatabaseManager:
 
     @property
     def session_factory(self) -> async_sessionmaker[AsyncSession]:
+        assert self._session_factory is not None
         return self._session_factory
 
 

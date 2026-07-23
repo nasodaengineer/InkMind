@@ -80,6 +80,8 @@ class RunLoop:
         if self._check_cancelled():
             return
 
+        assert self._uow.runs is not None
+
         # 获取 Run 记录
         run = await self._uow.runs.get_by_id(self._run_id)
         if run is None:
@@ -278,6 +280,8 @@ class RunLoop:
 
     async def _do_checkpoint(self) -> None:
         """将 partial_content 写入数据库。"""
+        assert self._uow.runs is not None
+
         run = await self._uow.runs.get_by_id(self._run_id)
         if run is None:
             return

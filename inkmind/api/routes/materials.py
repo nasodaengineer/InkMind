@@ -200,6 +200,9 @@ async def import_source(
     await session.commit()
 
     # 加载计数
+    assert uow.material_chunks is not None
+    assert uow.material_fragments is not None
+
     chunks = await uow.material_chunks.get_by_source(source.id)
     fragments = await uow.material_fragments.get_by_source(source.id)
 

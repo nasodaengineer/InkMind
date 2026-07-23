@@ -30,6 +30,7 @@ from inkmind.models.memory import (
     L2Archive,
     L3Archive,
     SlidingWindowState,
+    TimeRange,
 )
 from inkmind.storage.models import (
     CompressionTaskModel,
@@ -135,10 +136,10 @@ class RecoveryManager:
                 CompressionTask(
                     task_id=UUID(m.task_id),
                     novel_id=UUID(m.novel_id),
-                    range={
-                        "start_chapter": m.range_start,
-                        "end_chapter": m.range_end,
-                    },
+                    range=TimeRange(
+                        start_chapter=m.range_start,
+                        end_chapter=m.range_end,
+                    ),
                     status=CompressionTaskStatus.PENDING,
                     started_at=m.started_at,
                     completed_at=m.completed_at,

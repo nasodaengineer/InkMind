@@ -77,10 +77,9 @@ def novel_to_dict(model: NovelModel) -> dict:
 
 def dict_to_novel(data: dict) -> Novel:
     meta = data.get("metadata", {})
+    raw_id = data.get("id", data.get("uuid"))
     return Novel(
-        id=data.get("id", data.get("uuid"))
-        if isinstance(data.get("id"), UUID)
-        else UUID(data["id"]),
+        id=raw_id if isinstance(raw_id, UUID) else UUID(data["id"]),
         title=data["title"],
         metadata=NovelMetadata(
             description=meta.get("description", ""),
@@ -88,8 +87,8 @@ def dict_to_novel(data: dict) -> Novel:
             chapter_count=meta.get("chapter_count", 0),
             status=meta.get("status", "draft"),
         ),
-        created_at=data.get("created_at"),
-        updated_at=data.get("updated_at"),
+        created_at=data.get("created_at") or datetime.now(timezone.utc),
+        updated_at=data.get("updated_at") or datetime.now(timezone.utc),
     )
 
 
@@ -164,8 +163,8 @@ def dict_to_chapter(data: dict) -> Chapter:
         involved=data.get("involved", []),
         version=data.get("version", 1),
         is_baseline=data.get("is_baseline", False),
-        created_at=data.get("created_at"),
-        updated_at=data.get("updated_at"),
+        created_at=data.get("created_at") or datetime.now(timezone.utc),
+        updated_at=data.get("updated_at") or datetime.now(timezone.utc),
     )
 
 
@@ -231,7 +230,7 @@ def dict_to_chapter_version(data: dict) -> ChapterVersion:
         source_trace=data.get("source_trace", ""),
         is_baseline=data.get("is_baseline", False),
         content_digest=data.get("content_digest", ""),
-        created_at=data.get("created_at"),
+        created_at=data.get("created_at") or datetime.now(timezone.utc),
     )
 
 
@@ -302,8 +301,8 @@ def dict_to_character(data: dict) -> Character:
         knowledge=data.get("knowledge", []),
         voice_examples=data.get("voice_examples", ""),
         timeline=timeline,
-        created_at=data.get("created_at"),
-        updated_at=data.get("updated_at"),
+        created_at=data.get("created_at") or datetime.now(timezone.utc),
+        updated_at=data.get("updated_at") or datetime.now(timezone.utc),
     )
 
 
@@ -406,8 +405,8 @@ def dict_to_world(data: dict) -> World:
         power_system=_parse_power(data.get("power_system")),
         magic_system=_parse_magic(data.get("magic_system")),
         location_tree=[_parse_location(loc) for loc in (data.get("location_tree") or [])],
-        created_at=data.get("created_at"),
-        updated_at=data.get("updated_at"),
+        created_at=data.get("created_at") or datetime.now(timezone.utc),
+        updated_at=data.get("updated_at") or datetime.now(timezone.utc),
     )
 
 
@@ -518,8 +517,8 @@ def dict_to_run(data: dict) -> Run:
         overwritten_values=data.get("overwritten_values"),
         started_at=data.get("started_at"),
         completed_at=data.get("completed_at"),
-        created_at=data.get("created_at"),
-        updated_at=data.get("updated_at"),
+        created_at=data.get("created_at") or datetime.now(timezone.utc),
+        updated_at=data.get("updated_at") or datetime.now(timezone.utc),
     )
 
 
@@ -573,8 +572,8 @@ def dict_to_volume(data: dict) -> Volume:
         side_line=data.get("side_line", ""),
         volume_cliffhanger=data.get("volume_cliffhanger", ""),
         planned_size=data.get("planned_size", 10),
-        created_at=data.get("created_at"),
-        updated_at=data.get("updated_at"),
+        created_at=data.get("created_at") or datetime.now(timezone.utc),
+        updated_at=data.get("updated_at") or datetime.now(timezone.utc),
     )
 
 
@@ -622,8 +621,8 @@ def dict_to_outline_spine(data: dict) -> OutlineSpine:
         selling_points=data.get("selling_points", ""),
         world_background=data.get("world_background", ""),
         golden_finger=data.get("golden_finger", ""),
-        created_at=data.get("created_at"),
-        updated_at=data.get("updated_at"),
+        created_at=data.get("created_at") or datetime.now(timezone.utc),
+        updated_at=data.get("updated_at") or datetime.now(timezone.utc),
     )
 
 

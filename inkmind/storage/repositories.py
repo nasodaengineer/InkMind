@@ -901,7 +901,7 @@ class MaterialFragmentRepository:
                 MaterialFragmentModel.user_edited == False,
             )
         )
-        return result.rowcount
+        return result.rowcount  # type: ignore[attr-defined]
 
     async def delete(self, fragment_id: UUID, skip_if_edited: bool = True) -> bool:
         """删除片段。若 skip_if_edited 且 user_edited 为 True 则不删。"""

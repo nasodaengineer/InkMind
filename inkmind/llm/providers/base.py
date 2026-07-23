@@ -309,7 +309,7 @@ class BaseProvider(ABC):
         ...
 
     @abstractmethod
-    async def _do_chat_stream(
+    def _do_chat_stream(
         self,
         client: httpx.AsyncClient,
         messages: List[Dict[str, str]],

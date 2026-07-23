@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import ClassVar
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -23,7 +22,7 @@ from pydantic import BaseModel, Field
 #  常量：8 枚举类型（前后端同契约）
 # ═══════════════════════════════════════════════════════
 
-FRAGMENT_TYPES: ClassVar[list[str]] = [
+FRAGMENT_TYPES: list[str] = [
     "excerpt",
     "scene_idea",
     "character_seed",
@@ -38,14 +37,14 @@ FRAGMENT_TYPES: ClassVar[list[str]] = [
 #  状态枚举
 # ═══════════════════════════════════════════════════════
 
-MATERIAL_SOURCE_STATUSES: ClassVar[list[str]] = [
+MATERIAL_SOURCE_STATUSES: list[str] = [
     "pending",
     "processing",
     "done",
     "failed",
 ]
 
-MATERIAL_CHUNK_STATUSES: ClassVar[list[str]] = [
+MATERIAL_CHUNK_STATUSES: list[str] = [
     "pending",
     "done",
     "failed",

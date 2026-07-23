@@ -139,6 +139,9 @@ class UnitOfWork:
         Returns:
             (是重复, digest)
         """
+        assert self.idempotency is not None
+        assert self.chapters is not None
+
         # 1. 幂等检查（基于 content digest）
         digest = compute_content_digest(chapter.content)
         if await self.idempotency.is_duplicate(digest):
@@ -175,6 +178,9 @@ class UnitOfWork:
         Raises:
             ValueError: 如果章节和流水线的 novel_id 不一致
         """
+        assert self.chapters is not None
+        assert self.pipelines is not None
+
         # 验证 novel_id 一致性
         for ch in chapters:
             if ch.novel_id != pipeline_state.novel_id:
@@ -215,6 +221,8 @@ class UnitOfWork:
         Raises:
             ValueError: 非空总纲未确认覆盖时抛出
         """
+        assert self.spines is not None
+
         existing = await self.spines.get_by_novel(novel_id)
 
         if existing is not None:
@@ -261,6 +269,8 @@ class UnitOfWork:
         """
         from inkmind.models.novel import Volume
 
+        assert self.volumes is not None
+
         created: list[Volume] = []
         for i, vd in enumerate(volumes_data):
             vol = Volume(
@@ -301,6 +311,8 @@ class UnitOfWork:
         Returns:
             实际写入的 Chapter 列表
         """
+        assert self.chapters is not None
+
         chapters_created: list[Chapter] = []
 
         for ch_data in chapters_data:
@@ -375,6 +387,8 @@ class UnitOfWork:
             is_approved: 是否批准
             is_baseline: 是否标记为基线版本
         """
+        assert self.chapters is not None
+
         new_status = ChapterStatus.APPROVED if is_approved else ChapterStatus.REVISING
 
         # 更新章节状态
@@ -413,6 +427,8 @@ class UnitOfWork:
             MemoryArchiveModel,
         )
 
+        assert self._session is not None
+
         # 1. 更新/写入 L2Archive
         existing = await self._session.execute(
             sa_update(MemoryArchiveModel)
@@ -422,7 +438,7 @@ class UnitOfWork:
             )
             .values(data=compressed_data)
         )
-        if existing.rowcount == 0:
+        if existing.rowcount == 0:  # type: ignore[attr-defined]
             self._session.add(
                 MemoryArchiveModel(
                     novel_id=str(novel_id),
@@ -461,6 +477,8 @@ class UnitOfWork:
 
         from inkmind.storage.models import MemoryArchiveModel
 
+        assert self._session is not None
+
         # 1. 更新 L1 滑窗状态
         existing = await self._session.execute(
             sa_update(MemoryArchiveModel)
@@ -475,7 +493,7 @@ class UnitOfWork:
                 }
             )
         )
-        if existing.rowcount == 0:
+        if existing.rowcount == 0:  # type: ignore[attr-defined]
             self._session.add(
                 MemoryArchiveModel(
                     novel_id=str(novel_id),
@@ -512,6 +530,9 @@ class UnitOfWork:
 
         from inkmind.models.materials import MaterialChunk, MaterialSource
         from inkmind.storage.digest import compute_content_digest
+
+        assert self.material_sources is not None
+        assert self.material_chunks is not None
 
         # 1. 计算 digest
         digest = compute_content_digest(raw_text)
@@ -596,6 +617,9 @@ class UnitOfWork:
             error_message: 错误消息（失败时）
             chunk_retry_count: 更新重试次数（None 则不变）
         """
+        assert self.material_fragments is not None
+        assert self.material_chunks is not None
+
         # 1. 清除旧的非 user_edited 片段
         await self.material_fragments.delete_by_chunk_except_edited(chunk_id)
 
@@ -623,6 +647,8 @@ class UnitOfWork:
         Args:
             settings_json: 完整 LLMConfig 序列化 dict
         """
+        assert self.app_settings is not None
+
         await self.app_settings.upsert(settings_json)
 
     # ═══════════════════════════════════════════════════
@@ -635,6 +661,8 @@ class UnitOfWork:
         Args:
             stats_list: 来自 LLMClient.get_raw_stats() 的 ProviderStats 列表。
         """
+        assert self._session is not None
+
         for s in stats_list:
             model = ProviderStatsModel(
                 provider_name=s.provider_name,
@@ -676,6 +704,8 @@ class UnitOfWork:
         Raises:
             ValueError: 同章有 running 状态的 run 时 409
         """
+        assert self.runs is not None
+
         # 校验同章无 running run
         if chapter_id is not None:
             existing = await self.runs.get_running_for_chapter(chapter_id)
@@ -715,6 +745,9 @@ class UnitOfWork:
         Returns:
             chapter_id: 写入的 Chapter UUID
         """
+        assert self.runs is not None
+        assert self.chapters is not None
+
         run = await self.runs.get_by_id(run_id)
         if run is None:
             raise ValueError(f"Run {run_id} 不存在")
@@ -774,6 +807,8 @@ class UnitOfWork:
             new_status: 终态（awaiting_human/completed/failed/cancelled/interrupted）
             llm_stats: 聚合 LLM 统计快照
         """
+        assert self.runs is not None
+
         run = await self.runs.get_by_id(run_id)
         if run is None:
             raise ValueError(f"Run {run_id} 不存在")
@@ -814,6 +849,8 @@ class UnitOfWork:
         """
         from inkmind.storage.models import CompressionTaskModel
 
+        assert self._session is not None
+
         self._session.add(
             CompressionTaskModel(
                 task_id=str(task_id),
@@ -832,12 +869,14 @@ class UnitOfWork:
         锁已被 ``with uow`` 持有（_lock_held）时不重复获取，避免自锁死。
         """
         if self._lock is None or self._lock_held:
+            assert self._session is not None
             await self._session.commit()
             return
         acquired = await self._lock.aacquire()
         if not acquired:
             raise RuntimeError("数据库写锁超时，请稍后重试")
         try:
+            assert self._session is not None
             await self._session.commit()
         finally:
             self._lock.release()
@@ -851,5 +890,6 @@ class UnitOfWork:
         try:
             yield
         except Exception:
+            assert self._session is not None
             await self._session.rollback()
             raise

@@ -115,6 +115,9 @@ async def list_volumes(
     uow: UnitOfWork = Depends(get_uow),
 ) -> list[VolumeResponse]:
     """列出小说的所有卷（含派生章节区间）。"""
+    assert uow.volumes is not None
+    assert uow.chapters is not None
+
     volumes = await uow.volumes.get_by_novel(novel_id)
     result = []
     cursor = 1
@@ -134,6 +137,8 @@ async def create_volume(
     uow: UnitOfWork = Depends(get_uow),
 ) -> VolumeResponse:
     """创建新卷（尾部追加）。"""
+    assert uow.volumes is not None
+
     next_index = await uow.volumes.get_next_index(novel_id)
     volume = Volume(
         novel_id=novel_id,
@@ -157,6 +162,9 @@ async def get_volume(
     uow: UnitOfWork = Depends(get_uow),
 ) -> VolumeResponse:
     """获取单卷详情。"""
+    assert uow.volumes is not None
+    assert uow.chapters is not None
+
     volume = await uow.volumes.get_by_novel_and_index(novel_id, volume_index)
     if volume is None:
         raise HTTPException(status_code=404, detail="卷不存在")
@@ -175,6 +183,9 @@ async def update_volume(
 
     planned_size 调小须不小于已排章数。
     """
+    assert uow.volumes is not None
+    assert uow.chapters is not None
+
     volume = await uow.volumes.get_by_novel_and_index(novel_id, volume_index)
     if volume is None:
         raise HTTPException(status_code=404, detail="卷不存在")
@@ -212,6 +223,9 @@ async def delete_volume(
     uow: UnitOfWork = Depends(get_uow),
 ) -> None:
     """删除卷。仅空卷可删，非空返回 409。"""
+    assert uow.volumes is not None
+    assert uow.chapters is not None
+
     volume = await uow.volumes.get_by_novel_and_index(novel_id, volume_index)
     if volume is None:
         raise HTTPException(status_code=404, detail="卷不存在")
@@ -234,6 +248,9 @@ async def get_volume_spines(
     uow: UnitOfWork = Depends(get_uow),
 ) -> VolumeSpineResponse:
     """获取卷书脊树（含章 + 状态 + 节奏标记 + L1 伏笔徽标）。"""
+    assert uow.volumes is not None
+    assert uow.chapters is not None
+
     volume = await uow.volumes.get_by_novel_and_index(novel_id, volume_index)
     if volume is None:
         raise HTTPException(status_code=404, detail="卷不存在")
