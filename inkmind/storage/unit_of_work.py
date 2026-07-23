@@ -20,6 +20,7 @@ from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from inkmind.errors import StaleVersionError
 from inkmind.storage.concurrency import FileLock
 
 from inkmind.models.agent import ChapterStatus, PipelineState
@@ -919,6 +920,84 @@ class UnitOfWork:
                         status="pending",
                     )
                 )
+
+    # ═══════════════════════════════════════════════════
+    #  T12: 手动编辑落稿（人工门）
+    # ═══════════════════════════════════════════════════
+
+    async def t12_manual_edit(
+        self,
+        chapter_id: UUID,
+        new_content: str,
+        base_digest: str,
+        source_trace: str = "manual",
+    ) -> Chapter:
+        """T12: 手动编辑落稿。
+
+        三方原子：归档旧版 + 写章 + fingerprint_updates。
+        base_digest 校验在事务内，冲突即抛 StaleVersionError（409）。
+        不走 T1 content-digest 全局去重——改回旧文不吞。
+        """
+        chapter = await self.chapters.get_by_id(chapter_id)
+        if chapter is None:
+            raise ValueError(f"章节不存在: {chapter_id}")
+
+        current_digest = compute_content_digest(chapter.content)
+        if base_digest != current_digest:
+            raise StaleVersionError(expected=base_digest, actual=current_digest)
+
+        old_version = ChapterVersion(
+            chapter_id=chapter.id,
+            novel_id=chapter.novel_id,
+            version=chapter.version,
+            index=chapter.index,
+            title=chapter.title,
+            content=chapter.content,
+            summary=chapter.summary,
+            key_events=chapter.key_events,
+            source_trace=chapter.source_trace,
+            is_baseline=chapter.is_baseline,
+            content_digest=current_digest,
+        )
+        await self.chapters.save_version(old_version)
+
+        new_digest = compute_content_digest(new_content)
+        chapter.content = new_content
+        chapter.version += 1
+        chapter.source_trace = source_trace
+        chapter.content_digest = new_digest
+        await self.chapters.save(chapter)
+
+        return chapter
+
+    async def patch_chapter(
+        self,
+        chapter_id: UUID,
+        *,
+        content: str | None = None,
+        base_digest: str | None = None,
+        title: str | None = None,
+        summary: str | None = None,
+        key_events: list[str] | None = None,
+    ) -> Chapter:
+        """PATCH 一端两用：含 content → T12；否则大纲字段单行写。"""
+        if content is not None:
+            if base_digest is None:
+                raise ValueError("手动编辑必须提供 base_digest")
+            return await self.t12_manual_edit(chapter_id, content, base_digest)
+
+        chapter = await self.chapters.get_by_id(chapter_id)
+        if chapter is None:
+            raise ValueError(f"章节不存在: {chapter_id}")
+
+        if title is not None:
+            chapter.title = title
+        if summary is not None:
+            chapter.summary = summary
+        if key_events is not None:
+            chapter.key_events = key_events
+        await self.chapters.save(chapter)
+        return chapter
 
     # ═══════════════════════════════════════════════════
     #  通用

@@ -127,6 +127,7 @@ def chapter_to_dict(model: ChapterModel) -> dict:
         "involved": model.involved or [],
         "version": model.version,
         "is_baseline": model.is_baseline,
+        "content_digest": model.content_digest or "",
         "created_at": model.created_at or datetime.now(timezone.utc),
         "updated_at": model.updated_at or datetime.now(timezone.utc),
     }
@@ -164,6 +165,7 @@ def dict_to_chapter(data: dict) -> Chapter:
         involved=data.get("involved", []),
         version=data.get("version", 1),
         is_baseline=data.get("is_baseline", False),
+        content_digest=data.get("content_digest", ""),
         created_at=data.get("created_at") or datetime.now(timezone.utc),
         updated_at=data.get("updated_at") or datetime.now(timezone.utc),
     )
@@ -187,6 +189,7 @@ def chapter_to_orm(chapter: Chapter) -> dict:
         "involved": chapter.involved,
         "version": chapter.version,
         "is_baseline": chapter.is_baseline,
+        "content_digest": chapter.content_digest,
     }
 
 
