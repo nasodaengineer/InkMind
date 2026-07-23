@@ -776,7 +776,7 @@ class UnitOfWork:
         # 更新章节内容
         chapter.content = chapter_content
         chapter.title = chapter_title
-        chapter.status = ChapterStatus.APPROVED
+        chapter.status = ChapterStatus.AWAITING_HUMAN
         chapter.version += 1
 
         # 内嵌 T1 写 Chapter
@@ -831,6 +831,127 @@ class UnitOfWork:
             run.llm_stats = llm_stats
 
         await self.runs.save(run)
+
+    # ═══════════════════════════════════════════════════
+    #  T13: 人工定稿
+    # ═══════════════════════════════════════════════════
+
+    async def t13_human_finalize(
+        self,
+        novel_id: UUID,
+        chapter_index: int,
+    ) -> None:
+        """T13: 人工定稿 — AWAITING_HUMAN → FINALIZED + 记忆链路触发。
+
+        记忆链路：
+        1. L0 索引：将定稿内容按段落写入 L0 全文索引
+        2. L1 滑窗：更新活跃上下文窗口
+        3. L2 压缩：若滑窗外章节数 ≥ 阈值则创建压缩任务
+        """
+        from inkmind.storage.models import MemoryArchiveModel
+
+        assert self.chapters is not None
+        assert self._session is not None
+
+        chapter = await self.chapters.get_by_novel_and_index(novel_id, chapter_index)
+        if chapter is None:
+            raise ValueError(f"章节 {novel_id}:{chapter_index} 不存在")
+
+        chapter.status = ChapterStatus.FINALIZED
+        await self.chapters.save(chapter)
+
+        # ── L0 索引更新 ──
+        paragraphs = [p.strip() for p in chapter.content.split("\n") if p.strip()]
+        l0_entry = {
+            "chapter_index": chapter_index,
+            "title": chapter.title,
+            "paragraphs": paragraphs,
+            "word_count": len(chapter.content),
+        }
+
+        from sqlalchemy import select as sa_select
+
+        existing_l0 = await self._session.execute(
+            sa_select(MemoryArchiveModel).where(
+                MemoryArchiveModel.novel_id == str(novel_id),
+                MemoryArchiveModel.tier == "l0_index",
+            )
+        )
+        l0_model = existing_l0.scalar_one_or_none()
+        if l0_model is not None:
+            data = dict(l0_model.data) if l0_model.data else {}
+            chapters_index = data.get("chapters", {})
+            chapters_index[str(chapter_index)] = l0_entry
+            data["chapters"] = chapters_index
+            l0_model.data = data
+        else:
+            self._session.add(
+                MemoryArchiveModel(
+                    novel_id=str(novel_id),
+                    tier="l0_index",
+                    data={"chapters": {str(chapter_index): l0_entry}},
+                )
+            )
+
+        # ── L1 滑窗更新 ──
+        existing_l1 = await self._session.execute(
+            sa_select(MemoryArchiveModel).where(
+                MemoryArchiveModel.novel_id == str(novel_id),
+                MemoryArchiveModel.tier == "l1_active",
+            )
+        )
+        l1_model = existing_l1.scalar_one_or_none()
+        window_size = 5
+        if l1_model is not None:
+            data = dict(l1_model.data) if l1_model.data else {}
+            window = data.get("sliding_window", {}).get("window", [])
+            if chapter_index not in window:
+                window.append(chapter_index)
+            if len(window) > window_size:
+                window = window[-window_size:]
+            data.setdefault("sliding_window", {})["window"] = window
+            data["sliding_window"]["latest_finalized"] = chapter_index
+            l1_model.data = data
+        else:
+            self._session.add(
+                MemoryArchiveModel(
+                    novel_id=str(novel_id),
+                    tier="l1_active",
+                    data={
+                        "sliding_window": {
+                            "window": [chapter_index],
+                            "latest_finalized": chapter_index,
+                        },
+                        "snapshot": {},
+                    },
+                )
+            )
+
+        # ── L2 压缩任务（滑窗外章节 ≥ 10 时触发） ──
+        compression_threshold = 10
+        if l1_model is not None:
+            data = dict(l1_model.data) if l1_model.data else {}
+            window = data.get("sliding_window", {}).get("window", [])
+        else:
+            window = [chapter_index]
+
+        if chapter_index > window_size and (chapter_index - window[0]) >= compression_threshold:
+            from uuid import uuid4
+
+            from inkmind.storage.models import CompressionTaskModel
+
+            range_start = window[0] if window else 1
+            range_end = chapter_index - window_size
+            if range_end >= range_start:
+                self._session.add(
+                    CompressionTaskModel(
+                        task_id=str(uuid4()),
+                        novel_id=str(novel_id),
+                        range_start=range_start,
+                        range_end=range_end,
+                        status="pending",
+                    )
+                )
 
     # ═══════════════════════════════════════════════════
     #  通用

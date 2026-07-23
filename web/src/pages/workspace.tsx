@@ -78,12 +78,10 @@ function VerdictDialog({
 function HumanBar({
   chapterIndex,
   novelId,
-  editorHtml,
   onAction,
 }: {
   chapterIndex: number
   novelId: string
-  editorHtml: string
   onAction: () => void
 }) {
   const queryClient = useQueryClient()
@@ -92,10 +90,7 @@ function HumanBar({
   const handleFinalize = async () => {
     setFinalizing(true)
     try {
-      await api.chapters.patch(novelId, chapterIndex, {
-        status: "FINALIZED",
-        content: editorHtml,
-      })
+      await api.chapters.finalize(novelId, chapterIndex)
       queryClient.invalidateQueries({ queryKey: ["chapters", novelId] })
       onAction()
     } catch {
@@ -107,7 +102,7 @@ function HumanBar({
   const handleRevise = async () => {
     try {
       await api.chapters.patch(novelId, chapterIndex, {
-        status: "REVISING",
+        status: "revising",
       })
       queryClient.invalidateQueries({ queryKey: ["chapters", novelId] })
       onAction()
@@ -122,9 +117,6 @@ function HumanBar({
         等待人工确认
       </span>
       <div className="flex-1" />
-      <Button variant="ghost" size="sm" onClick={onAction}>
-        手动修改
-      </Button>
       <Button variant="outline" size="sm" onClick={handleRevise}>
         <RefreshCw className="w-3.5 h-3.5 mr-1" />
         批示再修
@@ -146,6 +138,160 @@ function HumanBar({
   )
 }
 
+// ── 结论卡 ─────────────────────────────────────────
+
+function VerdictCard({
+  verdict,
+  issues,
+}: {
+  verdict: "approve" | "needs_revision"
+  issues: string[]
+}) {
+  return (
+    <div
+      className={`mx-4 mt-3 p-3 rounded-md border text-sm ${
+        verdict === "approve"
+          ? "border-green-300 bg-green-50 dark:bg-green-950/20 dark:border-green-800"
+          : "border-amber-300 bg-amber-50 dark:bg-amber-950/20 dark:border-amber-800"
+      }`}
+    >
+      <div className="flex items-center gap-2 font-medium">
+        {verdict === "approve" ? (
+          <Check className="w-4 h-4 text-green-600" />
+        ) : (
+          <RefreshCw className="w-4 h-4 text-amber-600" />
+        )}
+        <span>{verdict === "approve" ? "评审通过" : "需要修订"}</span>
+      </div>
+      {issues.length > 0 && (
+        <ul className="mt-2 ml-6 list-disc text-muted-foreground space-y-0.5">
+          {issues.map((issue, i) => (
+            <li key={i}>{issue}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+// ── 版本选择器 ─────────────────────────────────────
+
+function VersionSelector({
+  novelId,
+  chapterId,
+  currentVersion,
+}: {
+  novelId: string
+  chapterId: string
+  currentVersion: number
+}) {
+  const [open, setOpen] = useState(false)
+  const [versions, setVersions] = useState<
+    import("@/lib/api").VersionItem[]
+  >([])
+  const [diffResult, setDiffResult] =
+    useState<import("@/lib/api").VersionDiffResponse | null>(null)
+  const [selectedVersion, setSelectedVersion] = useState<number | null>(null)
+
+  const loadVersions = async () => {
+    try {
+      const res = await api.chapters.versions(novelId, chapterId)
+      setVersions(res.versions)
+      setOpen(true)
+    } catch {
+      // ignore
+    }
+  }
+
+  const loadDiff = async (fromV: number) => {
+    try {
+      const res = await api.chapters.diff(novelId, chapterId, fromV, currentVersion)
+      setDiffResult(res)
+      setSelectedVersion(fromV)
+    } catch {
+      // ignore
+    }
+  }
+
+  if (currentVersion <= 1) return null
+
+  return (
+    <div className="relative">
+      <button
+        className="text-xs px-2 py-1 rounded border hover:bg-accent transition-colors"
+        onClick={() => (open ? setOpen(false) : loadVersions())}
+      >
+        v{currentVersion}▾
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-50 w-64 bg-background border rounded-md shadow-lg">
+          <div className="p-2 border-b text-xs font-medium text-muted-foreground">
+            历史版本
+          </div>
+          <div className="max-h-48 overflow-auto">
+            <button
+              className="w-full text-left px-3 py-2 text-sm hover:bg-accent/50 flex items-center justify-between"
+              onClick={() => {
+                setDiffResult(null)
+                setSelectedVersion(null)
+                setOpen(false)
+              }}
+            >
+              <span>v{currentVersion}（当前）</span>
+              <span className="text-[10px] text-green-600">最新</span>
+            </button>
+            {versions.map((v) => (
+              <button
+                key={v.id}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-accent/50 flex items-center justify-between"
+                onClick={() => loadDiff(v.version)}
+              >
+                <span>
+                  v{v.version} · {v.word_count}字
+                </span>
+                <span className="text-[10px] text-muted-foreground">
+                  {v.source_trace || "ai"}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {diffResult && selectedVersion !== null && (
+            <div className="border-t p-2 max-h-64 overflow-auto">
+              <div className="text-xs font-medium text-muted-foreground mb-1">
+                v{selectedVersion} → v{currentVersion} 差异
+              </div>
+              <div className="text-xs space-y-0.5 font-mono">
+                {diffResult.paragraphs.map((para, i) => (
+                  <div key={i}>
+                    {para.map((line, j) => (
+                      <div
+                        key={j}
+                        className={
+                          line.tag === "insert"
+                            ? "text-green-700 bg-green-50 dark:bg-green-950/30"
+                            : line.tag === "delete"
+                              ? "text-red-700 bg-red-50 dark:bg-red-950/30 line-through"
+                              : "text-muted-foreground"
+                        }
+                      >
+                        {line.tag === "insert" ? "+ " : line.tag === "delete" ? "- " : "  "}
+                        {line.text.slice(0, 80)}
+                        {line.text.length > 80 ? "…" : ""}
+                      </div>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── 主组件 ──────────────────────────────────────────
 
 export default function WorkspacePage() {
@@ -157,9 +303,6 @@ export default function WorkspacePage() {
   const editorRef = useRef<EditorHandle>(null)
   const sseRef = useRef<RunSSEConnection | null>(null)
   const preGenContentRef = useRef("") // 生成前内容副本，用于丢弃时恢复
-
-  // 编辑器 HTML 状态（用于 AWAITING_HUMAN 提交）
-  const [editorHtml, setEditorHtml] = useState("")
 
   // 状态
   const [selectedChapterId, setSelectedChapterId] = useState<string | null>(null)
@@ -173,6 +316,11 @@ export default function WorkspacePage() {
   const [toast, setToast] = useState<{ message: string; type: "error" | "info" } | null>(null)
   const [materialDrawerOpen, setMaterialDrawerOpen] = useState(false)
   const [pendingRunId, setPendingRunId] = useState(false)
+  const [mode, setMode] = useState<"write" | "review">("write")
+  const [lastVerdict, setLastVerdict] = useState<{
+    verdict: "approve" | "needs_revision"
+    issues: string[]
+  } | null>(null)
 
   // ── Queries ──────────────────────────────────────
 
@@ -240,9 +388,6 @@ export default function WorkspacePage() {
         // 加载已有内容
         if (activeRun.partial_content) {
           editorRef.current?.setContent(activeRun.partial_content)
-          setEditorHtml(
-            `<p>${activeRun.partial_content.replace(/\n/g, "<br>")}</p>`,
-          )
         }
       }
     }
@@ -266,8 +411,12 @@ export default function WorkspacePage() {
         onToken: (token) => {
           editorRef.current?.appendContent(token)
         },
-        onVerdict: () => {
-          // 纯通知，无需前端处理
+        onVerdict: (verdict) => {
+          setLastVerdict({
+            verdict: verdict === "approve" ? "approve" : "needs_revision",
+            issues: [],
+          })
+          setMode("review")
         },
         onDone: (status) => {
           setIsGenerating(false)
@@ -304,6 +453,8 @@ export default function WorkspacePage() {
       setSelectedChapterIndex(ch.index)
       setShowHumanBar(false)
       setShowVerdictDialog(false)
+      setMode("write")
+      setLastVerdict(null)
 
       // 从缓存或 API 加载内容
       if (chapterContentCache[ch.id]) {
@@ -315,6 +466,9 @@ export default function WorkspacePage() {
           editorRef.current?.setContent(html)
           setChapterContentCache((prev) => ({ ...prev, [ch.id]: html }))
           preGenContentRef.current = html
+          if (detail.status === "awaiting_human") {
+            setShowHumanBar(true)
+          }
         } catch {
           editorRef.current?.setContent("")
         }
@@ -487,6 +641,14 @@ export default function WorkspacePage() {
     APPROVED: "已通过",
     FINALIZED: "已定稿",
     AWAITING_HUMAN: "待人工",
+    planned: "已规划",
+    writing: "写作中",
+    draft_ready: "草稿就绪",
+    reviewing: "评审中",
+    revising: "修订中",
+    approved: "已通过",
+    finalized: "已定稿",
+    awaiting_human: "待人工",
   }
 
   // ── 渲染 ───────────────────────────────────────────
@@ -651,13 +813,15 @@ export default function WorkspacePage() {
                     <div className="flex items-center gap-2 mt-0.5 ml-8">
                       <span
                         className={`text-[10px] px-1.5 py-0.5 rounded-full border ${
-                          ch.status === "FINALIZED"
+                          ch.status === "FINALIZED" || ch.status === "finalized"
                             ? "text-green-600 border-green-300 bg-green-50 dark:bg-green-950/20"
-                            : ch.status === "APPROVED"
+                            : ch.status === "APPROVED" || ch.status === "approved"
                               ? "text-blue-600 border-blue-300 bg-blue-50 dark:bg-blue-950/20"
-                              : ch.status === "PLANNED"
-                                ? "text-gray-500 border-gray-300"
-                                : "text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-950/20"
+                              : ch.status === "AWAITING_HUMAN" || ch.status === "awaiting_human"
+                                ? "text-purple-600 border-purple-300 bg-purple-50 dark:bg-purple-950/20"
+                                : ch.status === "PLANNED" || ch.status === "planned"
+                                  ? "text-gray-500 border-gray-300"
+                                  : "text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-950/20"
                         }`}
                       >
                         {statusLabel[ch.status] || ch.status}
@@ -680,7 +844,36 @@ export default function WorkspacePage() {
                     ? `#${selectedChapter.index} ${selectedChapter.title || ""}`
                     : "选择章节"}
                 </span>
+
+                {/* 版本选择器 */}
+                {selectedChapter && selectedChapter.version > 1 && novelId && (
+                  <VersionSelector
+                    novelId={novelId}
+                    chapterId={selectedChapter.id}
+                    currentVersion={selectedChapter.version}
+                  />
+                )}
+
                 <div className="flex-1" />
+
+                {/* 模式 tab */}
+                {selectedChapter && (showHumanBar || selectedChapter.status === "awaiting_human") && (
+                  <div className="flex items-center border rounded-md overflow-hidden text-xs">
+                    <button
+                      className={`px-2.5 py-1 ${mode === "write" ? "bg-accent font-medium" : "text-muted-foreground hover:bg-accent/50"}`}
+                      onClick={() => setMode("write")}
+                    >
+                      写作
+                    </button>
+                    <button
+                      className={`px-2.5 py-1 border-l ${mode === "review" ? "bg-accent font-medium" : "text-muted-foreground hover:bg-accent/50"}`}
+                      onClick={() => setMode("review")}
+                    >
+                      评审
+                    </button>
+                  </div>
+                )}
+
                 {selectedChapterId && !isGenerating && !showHumanBar && (
                   <Button
                     size="sm"
@@ -697,13 +890,17 @@ export default function WorkspacePage() {
                 )}
               </div>
 
+              {/* 结论卡（评审模式） */}
+              {mode === "review" && lastVerdict && (
+                <VerdictCard verdict={lastVerdict.verdict} issues={lastVerdict.issues} />
+              )}
+
               {/* 编辑器内容 */}
               <div className="flex-1 overflow-auto p-4">
                 {selectedChapterId ? (
                   <Editor
                     ref={editorRef}
-                    readonly={isGenerating}
-                    onUpdate={(html) => setEditorHtml(html)}
+                    readonly={isGenerating || mode === "review"}
                     placeholder="选择章节开始编辑..."
                   />
                 ) : (
@@ -727,7 +924,6 @@ export default function WorkspacePage() {
                 <HumanBar
                   chapterIndex={selectedChapterIndex}
                   novelId={novelId}
-                  editorHtml={editorHtml}
                   onAction={handleHumanAction}
                 />
               )}

@@ -404,6 +404,9 @@ class ChapterStatus(str, Enum):
     APPROVED = "approved"
     """评审通过，等待记忆持久化"""
 
+    AWAITING_HUMAN = "awaiting_human"
+    """人工门：等待作者确认/编辑/定稿"""
+
     FINALIZED = "finalized"
     """全部完成"""
 

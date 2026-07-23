@@ -53,6 +53,42 @@ export interface ChapterDetail {
   updated_at: string
 }
 
+export interface FinalizeResponse {
+  id: string
+  index: number
+  title: string
+  status: string
+  version: number
+  word_count: number
+}
+
+export interface VersionItem {
+  id: string
+  version: number
+  title: string
+  content: string
+  source_trace: string
+  is_baseline: boolean
+  created_at: string
+  word_count: number
+}
+
+export interface VersionListResponse {
+  versions: VersionItem[]
+  current_version: number
+}
+
+export interface DiffLine {
+  tag: "equal" | "insert" | "delete"
+  text: string
+}
+
+export interface VersionDiffResponse {
+  from_version: number
+  to_version: number
+  paragraphs: DiffLine[][]
+}
+
 export interface StartRunRequest {
   kind: string
   chapter_id?: string | null
@@ -343,6 +379,22 @@ export const api = {
       request<ChapterDetail>(
         `/novels/${novelId}/chapters/${chapterIndex}/outline`,
         { method: "PATCH", body: JSON.stringify(data) },
+      ),
+
+    finalize: (novelId: string, chapterIndex: number) =>
+      request<FinalizeResponse>(
+        `/novels/${novelId}/chapters/${chapterIndex}/finalize`,
+        { method: "POST" },
+      ),
+
+    versions: (novelId: string, chapterId: string) =>
+      request<VersionListResponse>(
+        `/novels/${novelId}/chapters/${chapterId}/versions`,
+      ),
+
+    diff: (novelId: string, chapterId: string, fromVersion: number, toVersion: number) =>
+      request<VersionDiffResponse>(
+        `/novels/${novelId}/chapters/${chapterId}/versions/diff?from_version=${fromVersion}&to_version=${toVersion}`,
       ),
   },
 
