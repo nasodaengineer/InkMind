@@ -39,6 +39,11 @@ class StartRunRequest(BaseModel):
     kind: str = Field(description="generate / revise / finalize / plan")
     chapter_id: str | None = Field(default=None, description="关联章节 UUID")
 
+    # Issue #41: 批示修订参数
+    thread_ids: list[str] = Field(
+        default_factory=list, description="批示修订时勾选的批注 thread ID 列表"
+    )
+
     # Issue #42: AI 大纲规划参数
     level: str | None = Field(
         default=None, description="规划级别: spine / volume / chapter / split_volumes"
@@ -248,6 +253,13 @@ async def start_run(
             "volume_id": str(plan_params.volume_id) if plan_params.volume_id else None,
             "chapter_count": plan_params.chapter_count,
         }
+        await uow.runs.save(run)
+        await uow.commit()
+
+    # Issue #41: 持久化 thread_ids 到 run 的 llm_stats 透传
+    if kind == RunKind.REVISE and body.thread_ids:
+        run.llm_stats = run.llm_stats or {}
+        run.llm_stats["thread_ids"] = body.thread_ids
         await uow.runs.save(run)
         await uow.commit()
 

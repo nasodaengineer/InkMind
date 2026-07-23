@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from inkmind.models.agent import AnnotationRef
+
 if TYPE_CHECKING:
     from inkmind.agents.collaboration import ChapterContext
 
@@ -137,3 +139,123 @@ def build_editor_prompt(ctx: ChapterContext, content: str, iteration: int) -> st
 def build_memory_prompt(chapter_index: int, chapter_title: str, content: str) -> str:
     """MemoryKeeper 摘要 prompt：定稿章节全文。"""
     return f"请为第 {chapter_index} 章「{chapter_title}」生成结构化记忆。\n\n章节全文：\n{content}"
+
+
+# ──────────────────────────────────────────────
+#  五区批注序列化（Issue #41）
+# ──────────────────────────────────────────────
+
+_SERIALIZABLE_STATUSES = {"open", "relocated_fuzzy", "orphaned"}
+
+
+def serialize_annotations(annotations: list[AnnotationRef], content: str = "") -> str:
+    """将批注列表序列化为五区结构文本（服务端权威渲染）。
+
+    五区顺序：章节总评（无锚）→ 修订指令 → 保留要求 → 读者疑问 → 已失效批注。
+    序列化范围：status ∈ {open, relocated_fuzzy, orphaned} 且 intent ≠ note。
+    锚定条目按文中位置排序；orphaned 注明原文已被改写。
+    """
+    eligible = [a for a in annotations if a.status in _SERIALIZABLE_STATUSES and a.intent != "note"]
+    if not eligible:
+        return ""
+
+    chapter_general: list[AnnotationRef] = []
+    instructions: list[AnnotationRef] = []
+    references: list[AnnotationRef] = []
+    questions: list[AnnotationRef] = []
+    orphaned: list[AnnotationRef] = []
+
+    for a in eligible:
+        if a.status == "orphaned":
+            orphaned.append(a)
+        elif not a.anchored_quote:
+            chapter_general.append(a)
+        elif a.intent == "instruction":
+            instructions.append(a)
+        elif a.intent == "reference":
+            references.append(a)
+        elif a.intent == "question":
+            questions.append(a)
+        else:
+            chapter_general.append(a)
+
+    def _sort_key(a: AnnotationRef) -> int:
+        if content and a.anchored_quote:
+            pos = content.find(a.anchored_quote)
+            return pos if pos >= 0 else len(content)
+        return len(content)
+
+    instructions.sort(key=_sort_key)
+    references.sort(key=_sort_key)
+    questions.sort(key=_sort_key)
+
+    zones: list[str] = []
+
+    if chapter_general:
+        lines = ["【章节总评】"]
+        for a in chapter_general:
+            lines.append(_format_entry(a))
+        zones.append("\n".join(lines))
+
+    if instructions:
+        lines = ["【修订指令】"]
+        for a in instructions:
+            lines.append(_format_entry(a))
+        zones.append("\n".join(lines))
+
+    if references:
+        lines = ["【保留要求】"]
+        for a in references:
+            lines.append(_format_entry(a))
+        zones.append("\n".join(lines))
+
+    if questions:
+        lines = ["【读者疑问】"]
+        for a in questions:
+            lines.append(_format_entry(a))
+        zones.append("\n".join(lines))
+
+    if orphaned:
+        lines = ["【已失效批注】"]
+        for a in orphaned:
+            lines.append(_format_entry(a, orphaned=True))
+        zones.append("\n".join(lines))
+
+    return "\n\n".join(zones)
+
+
+def _format_entry(a: AnnotationRef, orphaned: bool = False) -> str:
+    parts: list[str] = []
+    if a.anchored_quote:
+        ctx = a.quote_context
+        anchor_line = f"锚定引文：「{a.anchored_quote}」"
+        if ctx.prefix or ctx.suffix:
+            anchor_line += f"（前：…{ctx.prefix} / 后：{ctx.suffix}…）"
+        parts.append(anchor_line)
+    if orphaned:
+        parts.append("（原文已被改写，请判断该意见是否仍需处理）")
+    for c in a.comments:
+        parts.append(c)
+    return "\n".join(parts)
+
+
+def build_annotation_revision_prompt(
+    ctx: ChapterContext,
+    previous_content: str,
+    serialized_annotations: str,
+    issues: list[str] | None = None,
+    iteration: int = 1,
+) -> str:
+    """Writer 批示修订 prompt：上一版草稿 + 五区序列化批注 + 可选 issues。"""
+    parts = [
+        f"小说《{ctx.novel_title}》第 {ctx.chapter_index} 章「{ctx.chapter_title}」"
+        f"的第 {iteration} 次修订。\n",
+        f"上一版草稿：\n{previous_content}\n",
+    ]
+    if serialized_annotations:
+        parts.append(f"作者批示：\n{serialized_annotations}\n")
+    if issues:
+        issue_lines = "\n".join(f"{i}. {issue}" for i, issue in enumerate(issues, 1))
+        parts.append(f"编辑提出的修改意见：\n{issue_lines}\n")
+    parts.append("请针对上述批示修订本章正文（800-1500 字），保留可取之处，直接输出修订后的正文。")
+    return "\n".join(parts)

@@ -196,31 +196,105 @@ class RunLoop:
     # ── Revise ──────────────────────────────────────────
 
     async def _run_revise(self, novel_id: UUID, chapter_id: UUID | None) -> None:
-        """Writer 修订 → Editor → awaiting_human"""
+        """Issue #41: 批示修订 — 单次直达 Writer（不过 Editor），回稿停 AWAITING_HUMAN。
+
+        从 run.llm_stats["thread_ids"] 读取勾选的批注，服务端权威序列化后发给 Writer。
+        回稿后将相关 thread 标记为 pending_relocate 以支撑重定位。
+        """
         if self._chapter is None:
             raise ValueError("revise 需要传入 chapter")
 
         self._emit_phase("revising")
 
-        # 用现有内容作为基线，让 Writer 重写
-        revised = await self._stream_revise(novel_id, self._chapter.content)
+        # 读取 thread_ids
+        assert self._uow.runs is not None
+        run = await self._uow.runs.get_by_id(self._run_id)
+        thread_ids: list[str] = []
+        if run and run.llm_stats:
+            thread_ids = run.llm_stats.get("thread_ids", [])
+
+        # 构建修订 prompt
+        prompt = self._build_revise_prompt(novel_id, self._chapter.content)
+        if thread_ids:
+            prompt = await self._build_annotation_revise_prompt(
+                novel_id, self._chapter.content, thread_ids
+            )
+
+        # 单次 Writer（不过 Editor）
+        revised = await self._accumulate_stream("writer", prompt, "revising")
         if self._cancelled:
             return
 
-        self._emit_phase("reviewing")
-        verdict = await self._call_editor(novel_id, revised)
-        if self._cancelled:
-            return
+        self._emit_phase("complete")
+        self._partial_content = revised
+        await self._do_checkpoint()
+        await self._finalize_draft(novel_id, revised)
+        self._emit_phase("awaiting_human")
 
-        if verdict == Verdict.APPROVE:
-            self._emit_phase("complete")
-            self._partial_content = revised
-            await self._do_checkpoint()
-            await self._finalize_draft(novel_id, revised)
-            self._emit_phase("awaiting_human")
-        else:
-            # 即使未通过也让人工介入
-            self._emit_phase("awaiting_human")
+        # 标记相关 thread 为 pending_relocate（回稿重定位）
+        if thread_ids:
+            await self._mark_threads_pending_relocate(thread_ids)
+
+    async def _build_annotation_revise_prompt(
+        self, novel_id: UUID, content: str, thread_ids: list[str]
+    ) -> str:
+        """从 thread_ids 加载批注，五区序列化后构建修订 prompt。"""
+        from inkmind.agents.prompts import build_annotation_revision_prompt, serialize_annotations
+        from inkmind.models.agent import AnnotationRef, QuoteContext
+        from inkmind.storage.repositories import AnnotationRepository
+
+        repo = AnnotationRepository(self._uow.session)
+
+        annotations: list[AnnotationRef] = []
+        for tid_str in thread_ids:
+            thread = await repo.get_thread(UUID(tid_str))
+            if thread is None:
+                continue
+            anchor_quote = thread.anchor.exact if thread.anchor else ""
+            prefix = thread.anchor.prefix if thread.anchor else ""
+            suffix = thread.anchor.suffix if thread.anchor else ""
+            annotations.append(
+                AnnotationRef(
+                    thread_id=thread.id,
+                    intent=thread.intent.value,
+                    status=thread.status.value,
+                    anchored_quote=anchor_quote,
+                    quote_context=QuoteContext(prefix=prefix, suffix=suffix),
+                    comments=[c.body for c in thread.comments],
+                )
+            )
+
+        serialized = serialize_annotations(annotations, content)
+
+        ctx = self._build_chapter_context(novel_id)
+        return build_annotation_revision_prompt(ctx, content, serialized, iteration=1)
+
+    async def _mark_threads_pending_relocate(self, thread_ids: list[str]) -> None:
+        """回稿后将相关 thread 标记为 pending_relocate（支撑崩溃续跑重定位）。"""
+        from inkmind.models.annotation import ThreadStatus, can_transition
+        from inkmind.storage.repositories import AnnotationRepository
+
+        repo = AnnotationRepository(self._uow.session)
+
+        for tid_str in thread_ids:
+            thread = await repo.get_thread(UUID(tid_str))
+            if thread is None:
+                continue
+            if can_transition(thread.status, ThreadStatus.pending_relocate):
+                await repo.update_thread_status(UUID(tid_str), ThreadStatus.pending_relocate)
+
+    def _build_chapter_context(self, novel_id: UUID):
+        """构建 ChapterContext（用于 prompt 构造）。"""
+        from inkmind.agents.collaboration import ChapterContext
+
+        title = self._chapter.title if self._chapter else "未命名章节"
+        index = self._chapter.index if self._chapter else 1
+        return ChapterContext(
+            novel_title="",
+            novel_description="",
+            chapter_index=index,
+            chapter_title=title,
+        )
 
     # ── Finalize ────────────────────────────────────────
 

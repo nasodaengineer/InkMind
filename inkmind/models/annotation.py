@@ -37,6 +37,7 @@ class ThreadStatus(str, Enum):
 VALID_TRANSITIONS: dict[ThreadStatus, set[ThreadStatus]] = {
     ThreadStatus.open: {ThreadStatus.pending_relocate, ThreadStatus.resolved},
     ThreadStatus.pending_relocate: {
+        ThreadStatus.open,
         ThreadStatus.relocated_fuzzy,
         ThreadStatus.orphaned,
     },
