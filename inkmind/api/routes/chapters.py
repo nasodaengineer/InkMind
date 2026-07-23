@@ -108,6 +108,12 @@ class VersionDiffResponse(BaseModel):
 _CONTENT_EDITABLE_STATUSES = {ChapterStatus.AWAITING_HUMAN}
 
 
+def _resolve_status(chapter) -> ChapterStatus:
+    if isinstance(chapter.status, ChapterStatus):
+        return chapter.status
+    return ChapterStatus(chapter.status)
+
+
 @router.get("/api/novels/{novel_id}/chapters")
 async def list_chapters(
     novel_id: UUID,
@@ -163,12 +169,7 @@ async def patch_chapter(
         raise HTTPException(status_code=404, detail="章节不存在")
 
     if body.content is not None:
-        status = (
-            chapter.status
-            if isinstance(chapter.status, ChapterStatus)
-            else ChapterStatus(chapter.status)
-        )
-        if status not in _CONTENT_EDITABLE_STATUSES:
+        if _resolve_status(chapter) not in _CONTENT_EDITABLE_STATUSES:
             raise HTTPException(
                 status_code=409,
                 detail="chapter_not_editable",
@@ -213,15 +214,10 @@ async def finalize_chapter(
     if chapter is None:
         raise HTTPException(status_code=404, detail="章节不存在")
 
-    status = (
-        chapter.status
-        if isinstance(chapter.status, ChapterStatus)
-        else ChapterStatus(chapter.status)
-    )
-    if status != ChapterStatus.AWAITING_HUMAN:
+    if _resolve_status(chapter) != ChapterStatus.AWAITING_HUMAN:
         raise HTTPException(
             status_code=409,
-            detail="chapter_not_editable",
+            detail="chapter_not_finalizable",
         )
 
     await uow.t13_human_finalize(novel_id, chapter_index)
