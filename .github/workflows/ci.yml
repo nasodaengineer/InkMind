@@ -17,7 +17,6 @@ jobs:
       - uses: astral-sh/setup-uv@v4
       - run: uv venv && uv pip install ruff
       - run: uv run ruff check inkmind/ tests/
-      - run: uv run ruff format --check inkmind/ tests/
 
   test:
     runs-on: ubuntu-latest

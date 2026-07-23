@@ -12,13 +12,10 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from uuid import UUID
 
 from sqlalchemy import (
     Boolean,
-    Column,
     DateTime,
-    Float,
     ForeignKey,
     Integer,
     String,

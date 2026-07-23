@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Callable, Optional
+from typing import AsyncIterator
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +25,6 @@ from inkmind.models.agent import ChapterStatus, PipelineState
 from inkmind.models.chapter import Chapter, ChapterVersion
 from inkmind.storage.idempotency import (
     IdempotencyGuard,
-    compute_packet_digest,
 )
 from inkmind.storage.repositories import (
     ChapterRepository,
@@ -36,7 +35,6 @@ from inkmind.storage.repositories import (
 )
 from inkmind.storage.digest import compute_content_digest
 from inkmind.errors import StaleVersionError
-from inkmind.storage.serializers import dict_to_pipeline_state, pipeline_state_to_orm
 
 
 class UnitOfWork:

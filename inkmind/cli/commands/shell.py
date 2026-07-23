@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import shlex
 import subprocess
-import sys
 
 from inkmind.cli.base_command import BaseCommand
 from inkmind.cli.config import CLIConfig

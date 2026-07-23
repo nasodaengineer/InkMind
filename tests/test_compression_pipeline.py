@@ -19,22 +19,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import AsyncIterator
+from datetime import datetime
 from uuid import UUID, uuid4
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 from inkmind.models.memory import (
     ActiveContext,
-    CharacterStateCard,
-    CompressedEvent,
-    CompressedMemory,
     CompressionGranularity,
-    CompressionMeta,
-    CompressionResult,
-    CompressionTask,
     CompressionTaskStatus,
     CompressStrategy,
     L0Index,
@@ -42,11 +35,8 @@ from inkmind.models.memory import (
     L3Archive,
     MemoryNotification,
     MemoryNotificationPayload,
-    MemorySnapshot,
     SlidingWindowState,
-    TimeRange,
     ForeshadowingMarker,
-    LongTermEntry,
     LongTermEntryType,
 )
 from inkmind.memory.compressor import MemoryKeeperCore, LLMCompressor

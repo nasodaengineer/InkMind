@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from uuid import UUID
 
 from inkmind.cli.base_command import BaseCommand
 from inkmind.cli.db import get_session

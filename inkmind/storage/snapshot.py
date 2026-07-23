@@ -21,7 +21,6 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from inkmind.storage.models import (
-    Base,
     ChapterModel,
     ChapterVersionModel,
     CharacterModel,
