@@ -44,6 +44,27 @@ class ChapterPatchRequest(BaseModel):
     status: str | None = None
 
 
+class ChapterOutlinePatchRequest(BaseModel):
+    title: str | None = None
+    summary: str | None = None
+    key_events: list[str] | None = None
+    rhythm_marker: str | None = None
+    pov: str | None = None
+    involved: list[str] | None = None
+
+
+class ChapterOutlineResponse(BaseModel):
+    id: str
+    index: int
+    title: str
+    status: str
+    summary: str
+    key_events: list[str]
+    rhythm_marker: str | None
+    pov: str
+    involved: list[str]
+
+
 @router.get("/api/novels/{novel_id}/chapters")
 async def list_chapters(
     novel_id: UUID,
@@ -114,6 +135,41 @@ async def patch_chapter(
     if updated is None:
         raise HTTPException(status_code=500, detail="保存后读取章节失败")
     return _chapter_to_detail(updated)
+
+
+@router.patch("/api/novels/{novel_id}/chapters/{chapter_index}/outline")
+async def patch_chapter_outline(
+    novel_id: UUID,
+    chapter_index: int,
+    body: ChapterOutlinePatchRequest,
+    session: AsyncSession = Depends(get_db),
+) -> ChapterOutlineResponse:
+    """更新章纲字段（summary/key_events/rhythm_marker/pov/involved）。"""
+    repo = ChapterRepository(session)
+
+    fields = body.model_dump(exclude_none=True)
+    if fields:
+        result = await repo.patch_outline(novel_id, chapter_index, fields)
+        if result is None:
+            raise HTTPException(status_code=404, detail="章节不存在")
+
+    await session.commit()
+
+    chapter = await repo.get_by_novel_and_index(novel_id, chapter_index)
+    if chapter is None:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    return ChapterOutlineResponse(
+        id=str(chapter.id),
+        index=chapter.index,
+        title=chapter.title,
+        status=chapter.status.value if hasattr(chapter.status, "value") else str(chapter.status),
+        summary=chapter.summary,
+        key_events=chapter.key_events,
+        rhythm_marker=chapter.rhythm_marker,
+        pov=chapter.pov,
+        involved=chapter.involved,
+    )
 
 
 def _chapter_to_detail(chapter) -> ChapterDetail:

@@ -26,9 +26,7 @@ from inkmind.models.novel import OutlineSpine, Volume
 def _extract_json(text: str) -> str:
     """从 LLM 响应中提取 JSON 块（`````json ... ````` 或裸 ``{``..``}``）。"""
     # 优先匹配 ```json ... ```
-    match = re.search(
-        r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL
-    )
+    match = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
     if match:
         return match.group(1).strip()
     # 退而求其次：找第一个 { 到最后一个 }
@@ -181,7 +179,7 @@ class PlannerService:
         )
 
         if existing_fields:
-            context += f"已有字段：\n  " + "\n  ".join(existing_fields) + "\n\n"
+            context += "已有字段：\n  " + "\n  ".join(existing_fields) + "\n\n"
             context += "请保留以上已有字段值不变，仅填补以下空字段：\n"
             if not volume.stage_goal:
                 context += "  - stage_goal（阶段目标）\n"
@@ -197,10 +195,7 @@ class PlannerService:
         if prompt:
             context += f"\n用户提示：{prompt}\n"
 
-        user_message = (
-            f"{context}\n"
-            f"请以 JSON 格式返回完整的四字段（含已有的）。"
-        )
+        user_message = f"{context}\n请以 JSON 格式返回完整的四字段（含已有的）。"
 
         response = await self._llm.chat(
             agent_role="planner",
@@ -220,8 +215,7 @@ class PlannerService:
             stage_goal=volume.stage_goal or data.get("stage_goal", ""),
             main_line=volume.main_line or data.get("main_line", ""),
             side_line=volume.side_line or data.get("side_line", ""),
-            volume_cliffhanger=volume.volume_cliffhanger
-            or data.get("volume_cliffhanger", ""),
+            volume_cliffhanger=volume.volume_cliffhanger or data.get("volume_cliffhanger", ""),
             planned_size=data.get("planned_size", volume.planned_size),
         )
 
@@ -328,10 +322,8 @@ class PlannerService:
         if existing_chapters:
             ctx_lines = []
             for ch in existing_chapters:
-                ctx_lines.append(
-                    f"  #{ch.get('chapter_index', '?')} {ch.get('title', '?')}"
-                )
-            context += f"已有章节：\n" + "\n".join(ctx_lines) + "\n"
+                ctx_lines.append(f"  #{ch.get('chapter_index', '?')} {ch.get('title', '?')}")
+            context += "已有章节：\n" + "\n".join(ctx_lines) + "\n"
 
         if prompt:
             context += f"\n用户提示：{prompt}\n"

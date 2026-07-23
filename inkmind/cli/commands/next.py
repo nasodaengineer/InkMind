@@ -15,7 +15,9 @@ from inkmind.models.agent import Verdict
 
 
 COMMAND = "next"
-HELP = "1 轮完整 Agent 协作（真实 LLM 生成）：Planner → Writer → Editor → MemoryKeeper → WindowShift"
+HELP = (
+    "1 轮完整 Agent 协作（真实 LLM 生成）：Planner → Writer → Editor → MemoryKeeper → WindowShift"
+)
 USAGE = "inkmind next [--title TITLE] [--db PATH] [--novel-id UUID]"
 
 
@@ -64,9 +66,7 @@ class NextCommand(BaseCommand):
             async with get_uow(db_path) as uow:
                 pipeline = CollaborationPipeline(llm)
                 try:
-                    result = await pipeline.run_one_round(
-                        uow, novel_id, title=args.title
-                    )
+                    result = await pipeline.run_one_round(uow, novel_id, title=args.title)
                 except ValueError as e:
                     formatter.error(str(e))
                     return
@@ -83,12 +83,8 @@ class NextCommand(BaseCommand):
                 await shutdown()
 
         # 输出结果
-        verdict_text = (
-            "评审通过" if result.verdict == Verdict.APPROVE else "兜底放行"
-        )
-        planner_text = (
-            f"新规划{result.planned_count}章" if result.planned_count else "复用大纲"
-        )
+        verdict_text = "评审通过" if result.verdict == Verdict.APPROVE else "兜底放行"
+        planner_text = f"新规划{result.planned_count}章" if result.planned_count else "复用大纲"
         summary = f"第 {result.chapter_index} 章「{result.chapter_title}」已完成一轮流水线"
         data = {
             "chapter_index": result.chapter_index,
@@ -120,9 +116,7 @@ class NextCommand(BaseCommand):
             if result.key_events:
                 formatter.info(f"关键事件: {', '.join(result.key_events)}")
             if result.max_iterations_hit:
-                formatter.info(
-                    "注意: 达到最大修订次数仍未通过评审，已放行定稿（可人工复查）"
-                )
+                formatter.info("注意: 达到最大修订次数仍未通过评审，已放行定稿（可人工复查）")
             # ADR-0010-D：文本模式输出 ⏱⚡💰 统计摘要行
             for name, s in _stats_block(llm).items():
                 if s["total_calls"]:

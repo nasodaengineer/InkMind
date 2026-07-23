@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 from typing import Any
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -43,18 +43,12 @@ class StartRunRequest(BaseModel):
     level: str | None = Field(
         default=None, description="规划级别: spine / volume / chapter / split_volumes"
     )
-    prompt: str | None = Field(
-        default=None, description="可选的提示文本，指导 LLM 生成方向"
-    )
+    prompt: str | None = Field(default=None, description="可选的提示文本，指导 LLM 生成方向")
     volume_count: int | None = Field(
         default=None, ge=2, le=20, description="拆卷数量（仅 split_volumes）"
     )
-    confirm_overwrite: bool = Field(
-        default=False, description="确认覆盖非空内容"
-    )
-    volume_id: str | None = Field(
-        default=None, description="关联的卷 UUID（仅 volume/chapter）"
-    )
+    confirm_overwrite: bool = Field(default=False, description="确认覆盖非空内容")
+    volume_id: str | None = Field(default=None, description="关联的卷 UUID（仅 volume/chapter）")
     chapter_count: int | None = Field(
         default=None, ge=5, le=50, description="待规划的章节数（仅 chapter）"
     )
@@ -314,18 +308,14 @@ async def stream_run(
         return _snapshot_sse_response(run)
 
     # running 状态 — 启动 RunLoop 并流式推送
-    return _streaming_run_response(
-        session, run_uuid, novel_uuid, chapter_uuid, plan_params
-    )
+    return _streaming_run_response(session, run_uuid, novel_uuid, chapter_uuid, plan_params)
 
 
 def _snapshot_sse_response(run) -> StreamingResponse:
     """为已完成/已中断的 Run 返回快照 SSE。"""
     events = []
     events.append(f"event: phase\ndata: {json.dumps({'phase': run.phase})}\n\n")
-    events.append(
-        f"event: done\ndata: {json.dumps({'status': run.status.value})}\n\n"
-    )
+    events.append(f"event: done\ndata: {json.dumps({'status': run.status.value})}\n\n")
 
     async def generate():
         for event in events:
@@ -369,9 +359,7 @@ def _streaming_run_response(
                 return
 
             # 创建 RunLoop（issue #42: 传递 plan_params）
-            loop = RunLoop.create(
-                uow, llm, run_uuid, chapter=chapter, plan_params=plan_params
-            )
+            loop = RunLoop.create(uow, llm, run_uuid, chapter=chapter, plan_params=plan_params)
             queue: asyncio.Queue = asyncio.Queue()
 
             def event_listener(event: str, data: Any) -> None:
@@ -398,9 +386,7 @@ def _streaming_run_response(
                 # 循环消费队列事件
                 while True:
                     try:
-                        event, data = await asyncio.wait_for(
-                            queue.get(), timeout=30.0
-                        )
+                        event, data = await asyncio.wait_for(queue.get(), timeout=30.0)
                     except asyncio.TimeoutError:
                         # 心跳保活
                         yield ": heartbeat\n\n"
@@ -454,9 +440,7 @@ async def list_runs(
     """获取小说的所有 Run 记录。"""
     novel_uuid = UUID(novel_id)
     runs = await uow.runs.get_by_novel(novel_uuid)
-    return RunListResponse(
-        runs=[_run_to_response(r) for r in runs]
-    )
+    return RunListResponse(runs=[_run_to_response(r) for r in runs])
 
 
 # ── 单 Run ────────────────────────────────────────────

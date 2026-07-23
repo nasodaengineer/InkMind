@@ -11,28 +11,20 @@
 
 from __future__ import annotations
 
-import asyncio
-import json
-import os
-import tempfile
-from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import select, text
-from sqlalchemy.ext.asyncio import AsyncSession
 
 import inkmind.storage.database as db_module
 from inkmind.api.app import create_app
-from inkmind.execution.runner import EventEmitter, RunLoop
+from inkmind.execution.runner import RunLoop
 from inkmind.llm.scripted import ScriptedLLMClient
 from inkmind.models.chapter import Chapter
 from inkmind.models.novel import Novel, NovelMetadata
 from inkmind.models.run import RunKind, RunStatus
 from inkmind.storage.database import DatabaseManager
-from inkmind.storage.models import RunsModel
 from inkmind.storage.recovery import RecoveryManager
 from inkmind.storage.unit_of_work import UnitOfWork
 
@@ -551,9 +543,7 @@ class TestRunHTTP:
         assert run_data["status"] == "running"
         assert run_data["kind"] == "generate"
 
-        get_resp = await client.get(
-            f"/novels/{novel.id}/runs/{run_data['id']}"
-        )
+        get_resp = await client.get(f"/novels/{novel.id}/runs/{run_data['id']}")
         assert get_resp.status_code == 200
         assert get_resp.json()["id"] == run_data["id"]
 
@@ -583,9 +573,7 @@ class TestRunHTTP:
         )
         run_id = run_resp.json()["id"]
 
-        cancel_resp = await client.post(
-            f"/novels/{novel.id}/runs/{run_id}/cancel"
-        )
+        cancel_resp = await client.post(f"/novels/{novel.id}/runs/{run_id}/cancel")
         assert cancel_resp.status_code == 200
         assert cancel_resp.json()["status"] == "cancelled"
 
@@ -639,9 +627,7 @@ class TestRunHTTP:
 
         await client.post(f"/novels/{novel.id}/runs/{run_id}/cancel")
 
-        sse_resp = await client.get(
-            f"/novels/{novel.id}/runs/{run_id}/stream"
-        )
+        sse_resp = await client.get(f"/novels/{novel.id}/runs/{run_id}/stream")
         assert sse_resp.status_code == 200
         assert "text/event-stream" in sse_resp.headers["content-type"]
         body = sse_resp.text
@@ -666,9 +652,7 @@ class TestCheckpoint:
         )
         await session.commit()
 
-        llm = ScriptedLLMClient(
-            responses={"writer": ["A" * 600]}
-        )
+        llm = ScriptedLLMClient(responses={"writer": ["A" * 600]})
         loop = RunLoop(uow, llm, run_id, chapter=chapter)
         loop._checkpoint_interval_bytes = 500
 

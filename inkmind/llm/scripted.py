@@ -180,10 +180,7 @@ class ScriptedLLMClient:
         return '{"verdict": "approve", "issues": []}'
 
     def _default_memory_keeper(self, prompt: str) -> str:
-        return (
-            '{"summary": "离线演示摘要：本章已定稿，情节按计划推进", '
-            '"key_events": ["章节完成"]}'
-        )
+        return '{"summary": "离线演示摘要：本章已定稿，情节按计划推进", "key_events": ["章节完成"]}'
 
     def _default_planner(self, prompt: str) -> str:
         # 从 prompt 解析起始章节序号（build_planner_prompt 输出「起始章节序号：N」），

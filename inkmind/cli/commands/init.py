@@ -44,6 +44,7 @@ class InitCommand(BaseCommand):
             try:
                 # 仅在交互式终端时尝试输入
                 import sys as _sys
+
                 if _sys.stdin.isatty():
                     desc_input = input("📝 小说简介（可选）: ").strip()
                     if desc_input:

@@ -5,9 +5,7 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -343,6 +341,7 @@ async def start_decompose(
     # 拆解完成后重建 FTS 索引
     try:
         from inkmind.storage.search import FTSManager
+
         fts_mgr = FTSManager(session)
         await fts_mgr.rebuild()
     except Exception:
@@ -465,10 +464,9 @@ async def update_fragment(
     # 获取 ORM 行 id（用于 FTS rowid）
     from inkmind.storage.models import MaterialFragmentModel
     from sqlalchemy import select as sql_select
+
     result = await session.execute(
-        sql_select(MaterialFragmentModel.id).where(
-            MaterialFragmentModel.uuid == str(fragment.id)
-        )
+        sql_select(MaterialFragmentModel.id).where(MaterialFragmentModel.uuid == str(fragment.id))
     )
     row_id = result.scalar_one_or_none()
     if row_id:
@@ -514,7 +512,6 @@ async def create_fragment(
     session: AsyncSession = Depends(get_db),
 ) -> FragmentResponse:
     """手工新建片段（归 pseudo-source 桶）。"""
-    from uuid import uuid4
 
     # 使用一个伪 source_id 来标识手工片段
     # 实际上查找或创建一个特殊标记的 source
@@ -568,10 +565,9 @@ async def create_fragment(
     await mgr.ensure_table()
     from inkmind.storage.models import MaterialFragmentModel
     from sqlalchemy import select as sql_select
+
     result = await session.execute(
-        sql_select(MaterialFragmentModel.id).where(
-            MaterialFragmentModel.uuid == str(fragment.id)
-        )
+        sql_select(MaterialFragmentModel.id).where(MaterialFragmentModel.uuid == str(fragment.id))
     )
     row_id = result.scalar_one_or_none()
     if row_id:
@@ -619,6 +615,7 @@ async def rerun_failed_chunks(
 
 class SearchResultItem(BaseModel):
     """搜索结果项。"""
+
     id: str
     title: str
     content: str

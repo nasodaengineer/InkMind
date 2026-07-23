@@ -9,9 +9,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from inkmind.api.dependencies import get_session, get_uow
+from inkmind.api.dependencies import get_uow
 from inkmind.models.novel import Volume
 from inkmind.storage.unit_of_work import UnitOfWork
 
@@ -26,6 +25,7 @@ router = APIRouter(
 
 class VolumeCreate(BaseModel):
     """创建卷请求。"""
+
     title: str = Field(min_length=1, max_length=200)
     planned_size: int = Field(default=10, ge=1, le=200)
     stage_goal: str = Field(default="")
@@ -36,6 +36,7 @@ class VolumeCreate(BaseModel):
 
 class VolumeUpdate(BaseModel):
     """更新卷请求。"""
+
     title: str | None = None
     stage_goal: str | None = None
     main_line: str | None = None
@@ -46,6 +47,7 @@ class VolumeUpdate(BaseModel):
 
 class VolumeResponse(BaseModel):
     """卷响应。"""
+
     id: str
     novel_id: str
     volume_index: int
@@ -56,12 +58,15 @@ class VolumeResponse(BaseModel):
     volume_cliffhanger: str
     planned_size: int
     chapter_count: int = 0
+    start_index: int = 1
+    end_index: int = 10
     created_at: str
     updated_at: str
 
 
 class ChapterSpineItem(BaseModel):
     """章节点（书脊树用）。"""
+
     id: str
     chapter_index: int
     title: str
@@ -70,15 +75,19 @@ class ChapterSpineItem(BaseModel):
     rhythm_marker: str | None = None
     pov: str = ""
     involved: list[str] = []
+    foreshadowing_count: int = 0
 
 
 class VolumeSpineResponse(BaseModel):
     """卷书脊树响应（含章节点）。"""
+
     volume: VolumeResponse
     chapters: list[ChapterSpineItem]
 
 
-def _volume_to_response(v: Volume, chapter_count: int = 0) -> VolumeResponse:
+def _volume_to_response(
+    v: Volume, chapter_count: int = 0, start_index: int = 1, end_index: int = 10
+) -> VolumeResponse:
     return VolumeResponse(
         id=str(v.id),
         novel_id=str(v.novel_id),
@@ -90,6 +99,8 @@ def _volume_to_response(v: Volume, chapter_count: int = 0) -> VolumeResponse:
         volume_cliffhanger=v.volume_cliffhanger,
         planned_size=v.planned_size,
         chapter_count=chapter_count,
+        start_index=start_index,
+        end_index=end_index,
         created_at=v.created_at.isoformat() if v.created_at else "",
         updated_at=v.updated_at.isoformat() if v.updated_at else "",
     )
@@ -103,12 +114,16 @@ async def list_volumes(
     novel_id: UUID,
     uow: UnitOfWork = Depends(get_uow),
 ) -> list[VolumeResponse]:
-    """列出小说的所有卷。"""
+    """列出小说的所有卷（含派生章节区间）。"""
     volumes = await uow.volumes.get_by_novel(novel_id)
     result = []
+    cursor = 1
     for v in volumes:
         count = await uow.chapters.count_by_volume(v.id)
-        result.append(_volume_to_response(v, count))
+        start = cursor
+        end = cursor + v.planned_size - 1
+        result.append(_volume_to_response(v, count, start, end))
+        cursor = end + 1
     return result
 
 
@@ -218,12 +233,36 @@ async def get_volume_spines(
     volume_index: int,
     uow: UnitOfWork = Depends(get_uow),
 ) -> VolumeSpineResponse:
-    """获取卷书脊树（含章 + 状态 + 节奏标记）。"""
+    """获取卷书脊树（含章 + 状态 + 节奏标记 + L1 伏笔徽标）。"""
     volume = await uow.volumes.get_by_novel_and_index(novel_id, volume_index)
     if volume is None:
         raise HTTPException(status_code=404, detail="卷不存在")
 
     chapters = await uow.chapters.get_chapters_by_volume(novel_id, volume.id)
+
+    # L1 派生伏笔徽标
+    from collections import Counter
+
+    from sqlalchemy import select
+
+    from inkmind.storage.models import MemoryArchiveModel
+
+    foreshadow_counts: Counter[int] = Counter()
+    result = await uow.session.execute(
+        select(MemoryArchiveModel).where(
+            MemoryArchiveModel.novel_id == str(novel_id),
+            MemoryArchiveModel.tier == "l1_active",
+        )
+    )
+    archive = result.scalar_one_or_none()
+    if archive and archive.data:
+        window = archive.data.get("sliding_window", {})
+        for marker in window.get("pending_foreshadowing", []):
+            if not marker.get("is_resolved", False):
+                planted = marker.get("planted_chapter")
+                if planted is not None:
+                    foreshadow_counts[planted] += 1
+
     chapter_items = [
         ChapterSpineItem(
             id=str(ch.id),
@@ -234,6 +273,7 @@ async def get_volume_spines(
             rhythm_marker=ch.rhythm_marker,
             pov=ch.pov,
             involved=ch.involved,
+            foreshadowing_count=foreshadow_counts.get(ch.index, 0),
         )
         for ch in chapters
     ]

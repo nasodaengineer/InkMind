@@ -19,7 +19,8 @@ def setup(subparsers: argparse._SubParsersAction) -> None:
         help="监听地址（默认: 127.0.0.1）",
     )
     parser.add_argument(
-        "-p", "--port",
+        "-p",
+        "--port",
         type=int,
         default=8000,
         help="监听端口（默认: 8000）",

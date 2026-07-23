@@ -92,9 +92,7 @@ class LLMClient:
 
     def get_stats(self):
         """获取所有 Provider 的运行时统计（可变累计器视图）。"""
-        return {
-            name: p.stats for name, p in self.factory.list_providers().items()
-        }
+        return {name: p.stats for name, p in self.factory.list_providers().items()}
 
     # ── Stats 聚合（ADR-0010 §10-C） ──────────────────────
 

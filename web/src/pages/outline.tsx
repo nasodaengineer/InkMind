@@ -1,7 +1,7 @@
 /* 三级书脊树 · 大纲规划视图（Issue #42 AI 大纲规划） */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   api,
@@ -236,16 +236,8 @@ export default function OutlinePage() {
 
   // ── 计算卷的派生区间 ──
 
-  function getVolumeRange(v: VolumeItem, all: VolumeItem[]): string {
-    // 基于卷序号累加之前的 planned_size
-    let start = 1;
-    for (const prev of all) {
-      if (prev.volume_index < v.volume_index) {
-        start += prev.planned_size;
-      }
-    }
-    const end = start + v.planned_size - 1;
-    return `${start}–${end} 章`;
+  function getVolumeRange(v: VolumeItem, _all: VolumeItem[]): string {
+    return `${v.start_index}–${v.end_index} 章`;
   }
 
   if (!novelId) {
@@ -675,7 +667,7 @@ function VolumeNode({
     }: {
       idx: number;
       data: Partial<ChapterOutlineItem>;
-    }) => api.chapters.patch(novelId, idx, data),
+    }) => api.chapters.patchOutline(novelId, idx, data),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["volume-spines", novelId, volume.volume_index],
@@ -1011,6 +1003,11 @@ function ChapterRow({
       <span className="text-xs text-gray-400 w-8">#{chapter.chapter_index}</span>
       {rhythmBadge && (
         <span className={`text-xs font-bold ${rhythmClass}`}>{rhythmBadge}</span>
+      )}
+      {(chapter.foreshadowing_count ?? 0) > 0 && (
+        <span className="text-xs px-1 py-0.5 rounded bg-purple-100 text-purple-600 font-medium" title="待回收伏笔">
+          伏{chapter.foreshadowing_count}
+        </span>
       )}
       <span className="flex-1 truncate">{chapter.title}</span>
       <span className="text-xs text-gray-400 truncate max-w-40 hidden sm:block">

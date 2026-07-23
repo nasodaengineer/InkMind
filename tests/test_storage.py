@@ -19,32 +19,15 @@ import os
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from inkmind.models.agent import ChapterStatus, PipelineState
 from inkmind.models.chapter import Chapter, ChapterVersion
 from inkmind.models.character import Character, CharacterTimelineEntry
-from inkmind.models.llm import (
-    AgentModelBinding,
-    LLMConfig,
-    ModelRouterConfig,
-    ProviderConfig,
-    ProviderProtocol,
-    RetryConfig,
-)
-from inkmind.models.memory import (
-    CompressionTask,
-    CompressionTaskStatus,
-    L0Index,
-    L2Archive,
-    L3Archive,
-    SlidingWindowState,
-)
 from inkmind.models.novel import Novel, NovelMetadata
 from inkmind.models.world import (
     Faction,
@@ -58,7 +41,6 @@ from inkmind.models.world import (
 from inkmind.storage.database import DatabaseManager
 from inkmind.storage.idempotency import (
     IdempotencyGuard,
-    compute_packet_digest,
 )
 from inkmind.storage.models import (
     AgentQueueModel,
@@ -70,9 +52,10 @@ from inkmind.storage.models import (
     NovelModel,
     PipelineStateModel,
     ProcessedDigestModel,
+    VolumeModel,
     WorldModel,
 )
-from inkmind.storage.recovery import RecoveryManager, RecoveredMemoryState
+from inkmind.storage.recovery import RecoveryManager
 from inkmind.storage.repositories import (
     ChapterRepository,
     CharacterRepository,
@@ -144,7 +127,20 @@ def sample_novel():
 
 
 @pytest.fixture
-def sample_chapter(sample_novel):
+def sample_volume(sample_novel):
+    from inkmind.models.novel import Volume
+
+    return Volume(
+        id=uuid4(),
+        novel_id=sample_novel.id,
+        volume_index=1,
+        title="测试卷",
+        planned_size=10,
+    )
+
+
+@pytest.fixture
+def sample_chapter(sample_novel, sample_volume):
     return Chapter(
         id=uuid4(),
         novel_id=sample_novel.id,
@@ -157,6 +153,7 @@ def sample_chapter(sample_novel):
         source_trace="test-model",
         version=1,
         is_baseline=True,
+        volume_id=sample_volume.id,
     )
 
 
@@ -288,9 +285,7 @@ def sample_pipeline(sample_novel):
 async def test_database_create_tables(db):
     """创建表后应存在所有表。"""
     async with db.session_factory() as s:
-        result = await s.execute(
-            select(NovelModel).limit(1)
-        )
+        result = await s.execute(select(NovelModel).limit(1))
         # 表存在即可查询，无行
         assert result is not None
 
@@ -308,11 +303,7 @@ async def test_database_session_commit_rollback(db):
 
     # 在另一个会话中验证
     async with db.session_factory() as s:
-        result = await s.execute(
-            select(NovelModel).where(
-                NovelModel.title == "提交测试"
-            )
-        )
+        result = await s.execute(select(NovelModel).where(NovelModel.title == "提交测试"))
         assert result.scalar_one_or_none() is not None
 
 
@@ -329,11 +320,7 @@ async def test_database_session_rollback_on_error(db):
 
     # 数据不应持久化
     async with db.session_factory() as s:
-        result = await s.execute(
-            select(NovelModel).where(
-                NovelModel.title == "回滚测试"
-            )
-        )
+        result = await s.execute(select(NovelModel).where(NovelModel.title == "回滚测试"))
         assert result.scalar_one_or_none() is None
 
 
@@ -386,12 +373,13 @@ async def test_orm_novel_crud(session, sample_novel):
 
 
 @pytest.mark.asyncio
-async def test_orm_chapter_crud(
-    session, sample_novel, sample_chapter
-):
+async def test_orm_chapter_crud(session, sample_novel, sample_volume, sample_chapter):
     """ChapterModel CRUD。"""
-    # 先插入 novel
+    # 先插入 novel + volume
     session.add(NovelModel(**novel_to_orm(sample_novel)))
+    from inkmind.storage.serializers import volume_to_orm
+
+    session.add(VolumeModel(**volume_to_orm(sample_volume)))
     await session.commit()
 
     orm_data = chapter_to_orm(sample_chapter)
@@ -410,9 +398,7 @@ async def test_orm_chapter_crud(
 
 
 @pytest.mark.asyncio
-async def test_orm_character_crud(
-    session, sample_novel, sample_character
-):
+async def test_orm_character_crud(session, sample_novel, sample_character):
     """CharacterModel CRUD。"""
     session.add(NovelModel(**novel_to_orm(sample_novel)))
     await session.commit()
@@ -460,9 +446,7 @@ async def test_orm_world_crud(session, sample_novel, sample_world):
 
 
 @pytest.mark.asyncio
-async def test_orm_pipeline_crud(
-    session, sample_novel, sample_pipeline
-):
+async def test_orm_pipeline_crud(session, sample_novel, sample_pipeline):
     """PipelineStateModel CRUD。"""
     session.add(NovelModel(**novel_to_orm(sample_novel)))
     await session.commit()
@@ -473,7 +457,9 @@ async def test_orm_pipeline_crud(
     await session.commit()
 
     result = await session.execute(
-        select(PipelineStateModel).where(PipelineStateModel.novel_id == str(sample_pipeline.novel_id))
+        select(PipelineStateModel).where(
+            PipelineStateModel.novel_id == str(sample_pipeline.novel_id)
+        )
     )
     loaded = result.scalar_one_or_none()
     assert loaded is not None
@@ -684,9 +670,7 @@ class TestSerializers:
 async def test_idempotency_not_duplicate(session):
     """新 digest 不应被标记为重复。"""
     guard = IdempotencyGuard(session)
-    dup = await guard.is_duplicate(
-        hashlib.sha256(b"new_data").hexdigest()
-    )
+    dup = await guard.is_duplicate(hashlib.sha256(b"new_data").hexdigest())
     assert dup is False
 
 
@@ -741,9 +725,7 @@ async def test_idempotency_same_digest_twice(session):
 
 
 @pytest.mark.asyncio
-async def test_novel_repository(
-    session, sample_novel, sample_chapter
-):
+async def test_novel_repository(session, sample_novel, sample_chapter):
     """NovelRepository 基本 CRUD。"""
     repo = NovelRepository(session)
 
@@ -766,9 +748,7 @@ async def test_novel_repository(
 
 
 @pytest.mark.asyncio
-async def test_novel_repository_get_all(
-    session, db
-):
+async def test_novel_repository_get_all(session, db):
     """get_all 返回所有小说。"""
     repo = NovelRepository(session)
     n1 = Novel(title="小说A", id=uuid4())
@@ -785,9 +765,7 @@ async def test_novel_repository_get_all(
 
 
 @pytest.mark.asyncio
-async def test_chapter_repository(
-    session, sample_novel, sample_chapter
-):
+async def test_chapter_repository(session, sample_novel, sample_chapter):
     """ChapterRepository CRUD。"""
     # 先插入 novel
     await session.execute(
@@ -810,16 +788,12 @@ async def test_chapter_repository(
     assert loaded.title == "第一章"
 
     # Read by novel + index
-    loaded2 = await repo.get_by_novel_and_index(
-        sample_novel.id, 1
-    )
+    loaded2 = await repo.get_by_novel_and_index(sample_novel.id, 1)
     assert loaded2 is not None
     assert loaded2.title == "第一章"
 
     # Update status
-    await repo.update_status(
-        sample_novel.id, 1, "draft_ready"
-    )
+    await repo.update_status(sample_novel.id, 1, "draft_ready")
     await session.commit()
 
     loaded3 = await repo.get_by_id(sample_chapter.id)
@@ -827,9 +801,7 @@ async def test_chapter_repository(
 
 
 @pytest.mark.asyncio
-async def test_chapter_repository_get_chapters_by_novel(
-    session, sample_novel
-):
+async def test_chapter_repository_get_chapters_by_novel(session, sample_novel):
     """get_chapters_by_novel 按 index 排序。"""
     await session.execute(
         NovelModel.__table__.insert().values(
@@ -863,9 +835,7 @@ async def test_chapter_repository_get_chapters_by_novel(
 
 
 @pytest.mark.asyncio
-async def test_character_repository(
-    session, sample_novel, sample_character
-):
+async def test_character_repository(session, sample_novel, sample_character):
     """CharacterRepository CRUD。"""
     await session.execute(
         NovelModel.__table__.insert().values(
@@ -889,9 +859,7 @@ async def test_character_repository(
 
 
 @pytest.mark.asyncio
-async def test_world_repository(
-    session, sample_novel, sample_world
-):
+async def test_world_repository(session, sample_novel, sample_world):
     """WorldRepository CRUD。"""
     await session.execute(
         NovelModel.__table__.insert().values(
@@ -912,9 +880,7 @@ async def test_world_repository(
 
 
 @pytest.mark.asyncio
-async def test_pipeline_repository(
-    session, sample_novel, sample_pipeline
-):
+async def test_pipeline_repository(session, sample_novel, sample_pipeline):
     """PipelineStateRepository CRUD。"""
     await session.execute(
         NovelModel.__table__.insert().values(
@@ -941,9 +907,7 @@ async def test_pipeline_repository(
 
 
 @pytest.mark.asyncio
-async def test_t1_writer_complete_chapter(
-    session, sample_novel, sample_chapter
-):
+async def test_t1_writer_complete_chapter(session, sample_novel, sample_chapter):
     """T1: Writer 完成章节。"""
     await session.execute(
         NovelModel.__table__.insert().values(
@@ -955,9 +919,7 @@ async def test_t1_writer_complete_chapter(
 
     uow = UnitOfWork(session)
 
-    is_dup, _ = await uow.t1_writer_complete_chapter(
-        sample_chapter
-    )
+    is_dup, _ = await uow.t1_writer_complete_chapter(sample_chapter)
     await session.commit()
     assert is_dup is False
 
@@ -970,9 +932,7 @@ async def test_t1_writer_complete_chapter(
 
 
 @pytest.mark.asyncio
-async def test_t1_writer_twice_is_dup(
-    session, sample_novel, sample_chapter
-):
+async def test_t1_writer_twice_is_dup(session, sample_novel, sample_chapter):
     """T1: 相同内容第二次提交应为重复。"""
     await session.execute(
         NovelModel.__table__.insert().values(
@@ -985,24 +945,18 @@ async def test_t1_writer_twice_is_dup(
     uow = UnitOfWork(session)
 
     # 第一次提交
-    is_dup1, digest = await uow.t1_writer_complete_chapter(
-        sample_chapter
-    )
+    is_dup1, digest = await uow.t1_writer_complete_chapter(sample_chapter)
     await session.commit()
     assert is_dup1 is False
 
     # 第二次提交（相同内容）
-    is_dup2, _ = await uow.t1_writer_complete_chapter(
-        sample_chapter
-    )
+    is_dup2, _ = await uow.t1_writer_complete_chapter(sample_chapter)
     await session.commit()
     assert is_dup2 is True
 
 
 @pytest.mark.asyncio
-async def test_t2_planner_complete_planning(
-    session, sample_novel
-):
+async def test_t2_planner_complete_planning(session, sample_novel):
     """T2: Planner 完成批量规划。"""
     await session.execute(
         NovelModel.__table__.insert().values(
@@ -1034,9 +988,7 @@ async def test_t2_planner_complete_planning(
 
     # 验证章节已创建
     for ch in chapters:
-        result = await session.execute(
-            select(ChapterModel).where(ChapterModel.uuid == str(ch.id))
-        )
+        result = await session.execute(select(ChapterModel).where(ChapterModel.uuid == str(ch.id)))
         loaded = result.scalar_one_or_none()
         assert loaded is not None
         assert loaded.status == "planned"
@@ -1050,9 +1002,7 @@ async def test_t2_planner_complete_planning(
 
 
 @pytest.mark.asyncio
-async def test_t3_editor_approve(
-    session, sample_novel, sample_chapter
-):
+async def test_t3_editor_approve(session, sample_novel, sample_chapter):
     """T3: Editor 批准章节。"""
     await session.execute(
         NovelModel.__table__.insert().values(
@@ -1076,17 +1026,13 @@ async def test_t3_editor_approve(
     )
     await session.commit()
 
-    loaded = await repo.get_by_novel_and_index(
-        sample_novel.id, 1
-    )
+    loaded = await repo.get_by_novel_and_index(sample_novel.id, 1)
     assert loaded.status == ChapterStatus.APPROVED
     assert loaded.is_baseline is True
 
 
 @pytest.mark.asyncio
-async def test_t3_editor_reject(
-    session, sample_novel, sample_chapter
-):
+async def test_t3_editor_reject(session, sample_novel, sample_chapter):
     """T3: Editor 驳回章节。"""
     await session.execute(
         NovelModel.__table__.insert().values(
@@ -1108,16 +1054,12 @@ async def test_t3_editor_reject(
     )
     await session.commit()
 
-    loaded = await repo.get_by_novel_and_index(
-        sample_novel.id, 1
-    )
+    loaded = await repo.get_by_novel_and_index(sample_novel.id, 1)
     assert loaded.status == ChapterStatus.REVISING
 
 
 @pytest.mark.asyncio
-async def test_t4_memory_compression(
-    session, sample_novel
-):
+async def test_t4_memory_compression(session, sample_novel):
     """T4: MemoryKeeper 完成压缩。"""
     await session.execute(
         NovelModel.__table__.insert().values(
@@ -1141,7 +1083,6 @@ async def test_t4_memory_compression(
     await session.commit()
 
     uow = UnitOfWork(session)
-    from datetime import datetime, timezone
 
     await uow.t4_memory_keeper_complete_compression(
         novel_id=sample_novel.id,
@@ -1176,9 +1117,7 @@ async def test_t4_memory_compression(
 
     # 验证任务已标记完成
     result = await session.execute(
-        sa_select(CompressionTaskModel).where(
-            CompressionTaskModel.task_id == str(task_id)
-        )
+        sa_select(CompressionTaskModel).where(CompressionTaskModel.task_id == str(task_id))
     )
     task = result.scalar_one_or_none()
     assert task.status == "completed"
@@ -1208,9 +1147,7 @@ async def test_create_compression_task_and_commit(session, sample_novel):
     from sqlalchemy import select as sa_select
 
     result = await session.execute(
-        sa_select(CompressionTaskModel).where(
-            CompressionTaskModel.task_id == str(task_id)
-        )
+        sa_select(CompressionTaskModel).where(CompressionTaskModel.task_id == str(task_id))
     )
     task = result.scalar_one_or_none()
     assert task is not None
@@ -1285,33 +1222,28 @@ async def test_uow_transaction_rollback(session, sample_novel):
 
 
 @pytest.mark.asyncio
-async def test_snapshot_dump_restore(
-    session, sample_novel, sample_chapter
-):
+async def test_snapshot_dump_restore(session, sample_novel, sample_volume, sample_chapter):
     """JSON dump 和 restore 的完整生命周期。"""
     # 先写入数据
+    from inkmind.storage.serializers import volume_to_orm
+
     session.add(NovelModel(**novel_to_orm(sample_novel)))
+    session.add(VolumeModel(**volume_to_orm(sample_volume)))
     session.add(ChapterModel(**chapter_to_orm(sample_chapter)))
     await session.commit()
 
     snapshot = JSONSnapshot(session)
 
-    with tempfile.NamedTemporaryFile(
-        suffix=".json", delete=False, mode="w", encoding="utf-8"
-    ) as f:
+    with tempfile.NamedTemporaryFile(suffix=".json", delete=False, mode="w", encoding="utf-8") as f:
         output_path = f.name
 
     try:
         # Dump
-        exported = await snapshot.dump(
-            sample_novel.id, output_path
-        )
+        await snapshot.dump(sample_novel.id, output_path)
         assert Path(output_path).exists()
 
         # 验证导出内容
-        raw = json.loads(
-            Path(output_path).read_text(encoding="utf-8")
-        )
+        raw = json.loads(Path(output_path).read_text(encoding="utf-8"))
         assert raw["novel_id"] == str(sample_novel.id)
         assert raw["novel"]["title"] == "测试小说"
         assert len(raw["chapters"]) == 1
@@ -1319,9 +1251,7 @@ async def test_snapshot_dump_restore(
 
         # Restore（先清理）
         await session.execute(
-            NovelModel.__table__.delete().where(
-                NovelModel.uuid == str(sample_novel.id)
-            )
+            NovelModel.__table__.delete().where(NovelModel.uuid == str(sample_novel.id))
         )
         await session.commit()
 
@@ -1338,15 +1268,11 @@ async def test_snapshot_dump_restore(
 
 
 @pytest.mark.asyncio
-async def test_recovery_basic(
-    session, sample_novel, sample_pipeline
-):
+async def test_recovery_basic(session, sample_novel, sample_pipeline):
     """Recovery: 基本恢复流程。"""
     # 写入数据
     session.add(NovelModel(**novel_to_orm(sample_novel)))
-    session.add(
-        PipelineStateModel(**pipeline_state_to_orm(sample_pipeline))
-    )
+    session.add(PipelineStateModel(**pipeline_state_to_orm(sample_pipeline)))
     session.add(
         MemoryArchiveModel(
             novel_id=str(sample_novel.id),

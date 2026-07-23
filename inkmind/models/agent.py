@@ -18,7 +18,6 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field
@@ -121,9 +120,7 @@ class ChapterOutline(ChapterIndex):
     summary: str = Field(min_length=20, max_length=2000, description="本章摘要")
     key_events: list[str] = Field(min_length=1, description="关键事件列表")
     pov_character_id: UUID | None = Field(None, description="视角角色 ID")
-    involved_character_ids: list[UUID] = Field(
-        default_factory=list, description="出场角色 ID 列表"
-    )
+    involved_character_ids: list[UUID] = Field(default_factory=list, description="出场角色 ID 列表")
 
 
 # ── 规划阶段 ──
@@ -156,14 +153,10 @@ class PlanRequestPayload(BaseModel):
     )
 
     # Issue #42: AI 大纲规划新增字段
-    level: PlanLevel = Field(
-        default=PlanLevel.CHAPTER, description="规划操作粒度"
-    )
+    level: PlanLevel = Field(default=PlanLevel.CHAPTER, description="规划操作粒度")
     """规划操作类型：spine / volume / chapter / split_volumes"""
 
-    prompt: str | None = Field(
-        default=None, description="可选的提示文本，指导 LLM 生成方向"
-    )
+    prompt: str | None = Field(default=None, description="可选的提示文本，指导 LLM 生成方向")
     """用户可输入提示词指导 LLM 生成方向（如「偏向悬疑风格」）。"""
 
     volume_count: int = Field(
@@ -199,9 +192,7 @@ class WriteRequestPayload(BaseModel):
 
     novel_id: UUID
     chapter_outline: ChapterOutline
-    context_summary: str = Field(
-        ..., description="包括前文摘要、角色状态、世界观等上下文"
-    )
+    context_summary: str = Field(..., description="包括前文摘要、角色状态、世界观等上下文")
     word_count_min: int = Field(default=1000, ge=500, description="目标字数下限")
     word_count_max: int = Field(default=3000, le=5000, description="目标字数上限")
 
@@ -265,9 +256,7 @@ class MemorizeRequestPayload(BaseModel):
         default_factory=list,
         description="本章中角色的关键事件，格式: [{character_id, event}]",
     )
-    location_changes: list[str] = Field(
-        default_factory=list, description="本章涉及的地点变化"
-    )
+    location_changes: list[str] = Field(default_factory=list, description="本章涉及的地点变化")
 
 
 class MemorizedPayload(BaseModel):
@@ -294,9 +283,7 @@ class SnapshotResponsePayload(BaseModel):
 
     novel_id: UUID
     target_chapter: int
-    snapshot: dict = Field(
-        ..., description="MemorySnapshot 的 dict 表示（避免跨模块循环）"
-    )
+    snapshot: dict = Field(..., description="MemorySnapshot 的 dict 表示（避免跨模块循环）")
 
 
 class CompressionNotificationPayload(BaseModel):
@@ -426,11 +413,7 @@ class PipelineState(BaseModel):
 
     novel_id: UUID
     total_chapters: int = 0
-    chapters: dict[int, ChapterStatus] = Field(
-        default_factory=dict, description="章节序号 → 状态"
-    )
-    current_chapter_index: int | None = Field(
-        None, description="流水线当前正在处理的章节"
-    )
+    chapters: dict[int, ChapterStatus] = Field(default_factory=dict, description="章节序号 → 状态")
+    current_chapter_index: int | None = Field(None, description="流水线当前正在处理的章节")
     iteration: int = Field(default=0, ge=0, description="当前章节的修订迭代次数")
     max_iterations: int = Field(default=3, ge=1, le=10, description="最大允许的修订次数")

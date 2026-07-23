@@ -53,8 +53,15 @@ class OpenAIProvider(BaseProvider):
             "stream": False,
         }
         # 合并额外参数（如 temperature, max_tokens, reasoning_effort 等）
-        safe_params = {"temperature", "max_tokens", "top_p", "frequency_penalty",
-                       "presence_penalty", "stop", "reasoning_effort"}
+        safe_params = {
+            "temperature",
+            "max_tokens",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+            "stop",
+            "reasoning_effort",
+        }
         for k, v in kwargs.items():
             if k in safe_params and v is not None:
                 payload[k] = v
@@ -95,8 +102,14 @@ class OpenAIProvider(BaseProvider):
             "messages": messages,
             "stream": True,
         }
-        safe_params = {"temperature", "max_tokens", "top_p", "frequency_penalty",
-                       "presence_penalty", "stop"}
+        safe_params = {
+            "temperature",
+            "max_tokens",
+            "top_p",
+            "frequency_penalty",
+            "presence_penalty",
+            "stop",
+        }
         for k, v in kwargs.items():
             if k in safe_params and v is not None:
                 payload[k] = v
@@ -115,6 +128,7 @@ class OpenAIProvider(BaseProvider):
                 if json_str == "[DONE]":
                     break
                 import json
+
                 chunk = json.loads(json_str)
                 delta = chunk.get("choices", [{}])[0].get("delta", {})
                 content = delta.get("content", "")

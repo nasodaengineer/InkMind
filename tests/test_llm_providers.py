@@ -13,8 +13,7 @@
 from __future__ import annotations
 
 import json
-import os
-from typing import AsyncGenerator, Dict, List, Optional
+from typing import List, Optional
 from uuid import UUID
 
 import httpx
@@ -181,9 +180,7 @@ def _make_ollama_cfg(
     )
 
 
-def _mock_client_for_provider(
-    provider, app, base_url: str = "https://api.deepseek.com"
-):
+def _mock_client_for_provider(provider, app, base_url: str = "https://api.deepseek.com"):
     """用 ASGITransport mock 替换 provider 内部的 httpx 客户端。"""
     transport = ASGITransport(app=app)
     client = AsyncClient(transport=transport, base_url=base_url)
@@ -649,9 +646,7 @@ class TestAnthropicProvider:
                 "usage": {"input_tokens": 10, "output_tokens": 20},
             }
         )
-        _mock_client_for_provider(
-            provider, app, base_url="https://api.anthropic.com"
-        )
+        _mock_client_for_provider(provider, app, base_url="https://api.anthropic.com")
 
         response = await provider.chat("测试提示词")
         assert response.content == "hello from claude"
@@ -670,9 +665,7 @@ class TestAnthropicProvider:
                 "stop_reason": "end_turn",
             }
         )
-        _mock_client_for_provider(
-            provider, app, base_url="https://api.anthropic.com"
-        )
+        _mock_client_for_provider(provider, app, base_url="https://api.anthropic.com")
 
         response = await provider.chat("hello", system_prompt="be polite")
         assert response.content == "polite response"
@@ -686,9 +679,7 @@ class TestAnthropicProvider:
             {"type": "content_block_delta", "delta": {"text": " World"}},
         ]
         app = _make_stream_asgi_app(chunks)
-        _mock_client_for_provider(
-            provider, app, base_url="https://api.anthropic.com"
-        )
+        _mock_client_for_provider(provider, app, base_url="https://api.anthropic.com")
 
         collected = []
         async for chunk in provider.chat_stream("test"):
@@ -707,9 +698,7 @@ class TestAnthropicProvider:
             {"type": "content_block_delta", "delta": {"text": "B"}},
         ]
         app = _make_stream_asgi_app(chunks)
-        _mock_client_for_provider(
-            provider, app, base_url="https://api.anthropic.com"
-        )
+        _mock_client_for_provider(provider, app, base_url="https://api.anthropic.com")
 
         collected = []
         async for chunk in provider.chat_stream("test"):
@@ -759,9 +748,7 @@ class TestOllamaProvider:
                 "usage": {"total_tokens": 5},
             }
         )
-        _mock_client_for_provider(
-            provider, app, base_url="http://localhost:11434"
-        )
+        _mock_client_for_provider(provider, app, base_url="http://localhost:11434")
 
         response = await provider.chat("测试提示词")
         assert response.content == "hello from ollama"
@@ -779,9 +766,7 @@ class TestOllamaProvider:
             {"choices": [{"delta": {"content": " Ollama"}}]},
         ]
         app = _make_stream_asgi_app(chunks)
-        _mock_client_for_provider(
-            provider, app, base_url="http://localhost:11434"
-        )
+        _mock_client_for_provider(provider, app, base_url="http://localhost:11434")
 
         collected = []
         async for chunk in provider.chat_stream("test"):
@@ -804,9 +789,7 @@ class TestOllamaProvider:
                 "model": "mistral",
             }
         )
-        _mock_client_for_provider(
-            provider, app, base_url="http://localhost:11434"
-        )
+        _mock_client_for_provider(provider, app, base_url="http://localhost:11434")
 
         response = await provider.chat("test", model="mistral")
         assert response.model == "mistral"

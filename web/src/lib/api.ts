@@ -69,6 +69,8 @@ export interface VolumeItem {
   volume_cliffhanger: string
   planned_size: number
   chapter_count: number
+  start_index: number
+  end_index: number
   created_at: string
   updated_at: string
 }
@@ -95,6 +97,7 @@ export interface ChapterOutlineItem {
   pov: string
   involved: string[]
   volume_id?: string | null
+  foreshadowing_count?: number
 }
 
 export interface VolumeSpineResponse {
@@ -322,6 +325,23 @@ export const api = {
     ) =>
       request<ChapterDetail>(
         `/novels/${novelId}/chapters/${chapterIndex}`,
+        { method: "PATCH", body: JSON.stringify(data) },
+      ),
+
+    patchOutline: (
+      novelId: string,
+      chapterIndex: number,
+      data: {
+        title?: string
+        summary?: string
+        key_events?: string[]
+        rhythm_marker?: string | null
+        pov?: string
+        involved?: string[]
+      },
+    ) =>
+      request<ChapterDetail>(
+        `/novels/${novelId}/chapters/${chapterIndex}/outline`,
         { method: "PATCH", body: JSON.stringify(data) },
       ),
   },

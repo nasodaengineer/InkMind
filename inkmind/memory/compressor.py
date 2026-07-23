@@ -224,9 +224,7 @@ class MemoryKeeperCore:
         foreshadowing_notes = []
         if self._sliding_window:
             for m in self._sliding_window.pending_foreshadowing:
-                note = (
-                    f"[伏笔] 第{m.planted_chapter}章: {m.description}"
-                )
+                note = f"[伏笔] 第{m.planted_chapter}章: {m.description}"
                 if m.expected_payoff_chapter:
                     note += f"（预期第{m.expected_payoff_chapter}章回收）"
                 foreshadowing_notes.append(note)
@@ -329,12 +327,10 @@ class MemoryKeeperCore:
                 current_chapter_index=chapter_index,
                 recent_chapters=[chapter_index],
             )
-            self._sliding_window.current_expanded_size = (
-                self._sliding_window.default_window_size
-            )
+            self._sliding_window.current_expanded_size = self._sliding_window.default_window_size
 
         sw = self._sliding_window
-        prev_chapter = sw.current_chapter_index
+        _prev_chapter = sw.current_chapter_index
         sw.current_chapter_index = chapter_index
 
         # 追加到 recent_chapters
@@ -403,14 +399,11 @@ class MemoryKeeperCore:
         # 滑窗覆盖范围
         window_start = min(sw.recent_chapters)
         window_end = max(sw.recent_chapters)
-        current_size = window_end - window_start + 1
+        _current_size = window_end - window_start + 1
 
         # 检查伏笔
         for marker in sw.pending_foreshadowing:
-            if (
-                marker.expected_payoff_chapter
-                and marker.expected_payoff_chapter > window_end
-            ):
+            if marker.expected_payoff_chapter and marker.expected_payoff_chapter > window_end:
                 extra = marker.expected_payoff_chapter - window_end
                 if extra > 0:
                     return (
@@ -423,9 +416,7 @@ class MemoryKeeperCore:
 
     # ── L2 压缩决策 ──
 
-    def _check_compression_trigger(
-        self, chapter_index: int
-    ) -> CompressionTask | None:
+    def _check_compression_trigger(self, chapter_index: int) -> CompressionTask | None:
         """检查是否需要触发 L2 压缩。
 
         触发条件（任一满足）：
@@ -500,11 +491,13 @@ class MemoryKeeperCore:
         chapters = []
         for entry in self._l0_index.entries:
             if r.start_chapter <= entry.chapter_index <= r.end_chapter:
-                chapters.append({
-                    "index": entry.chapter_index,
-                    "content_hash": entry.content_hash,
-                    "keywords": entry.keywords,
-                })
+                chapters.append(
+                    {
+                        "index": entry.chapter_index,
+                        "content_hash": entry.content_hash,
+                        "keywords": entry.keywords,
+                    }
+                )
 
         # 去重
         seen = set()

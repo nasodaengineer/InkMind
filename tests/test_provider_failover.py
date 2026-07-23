@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from inkmind.llm.providers.base import ProviderStatsAccumulator
 
@@ -28,7 +27,9 @@ class TestProviderFailover:
         assert hasattr(stats, "estimated_cost")
 
         # 测试 record_success
-        stats.record_success(0.5, {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30})
+        stats.record_success(
+            0.5, {"prompt_tokens": 10, "completion_tokens": 20, "total_tokens": 30}
+        )
         assert stats.min_latency == 0.5
         assert stats.max_latency == 0.5
         assert stats.avg_latency == 0.5

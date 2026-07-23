@@ -92,9 +92,7 @@ def _json_app(payload: dict, status_code: int = 200):
                 "headers": [(b"content-type", b"application/json")],
             }
         )
-        await send(
-            {"type": "http.response.body", "body": json.dumps(payload).encode()}
-        )
+        await send({"type": "http.response.body", "body": json.dumps(payload).encode()})
 
     return app
 
@@ -261,9 +259,7 @@ class TestCallInstrumentation:
     @pytest.mark.asyncio
     async def test_chat_failure_snapshot_error_type_rate_limit(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
-        provider = OpenAIProvider(
-            _make_cfg(), retry=RetryConfig(max_retries=0)
-        )
+        provider = OpenAIProvider(_make_cfg(), retry=RetryConfig(max_retries=0))
         _mock_client(provider, _json_app({"error": "slow down"}, status_code=429))
 
         with pytest.raises(httpx.HTTPStatusError):
@@ -277,9 +273,7 @@ class TestCallInstrumentation:
     @pytest.mark.asyncio
     async def test_chat_failure_snapshot_error_type_auth(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
-        provider = OpenAIProvider(
-            _make_cfg(), retry=RetryConfig(max_retries=0)
-        )
+        provider = OpenAIProvider(_make_cfg(), retry=RetryConfig(max_retries=0))
         _mock_client(provider, _json_app({"error": "bad key"}, status_code=401))
 
         with pytest.raises(httpx.HTTPStatusError):
@@ -290,9 +284,7 @@ class TestCallInstrumentation:
     @pytest.mark.asyncio
     async def test_chat_failure_snapshot_error_type_timeout(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
-        provider = OpenAIProvider(
-            _make_cfg(), retry=RetryConfig(max_retries=0)
-        )
+        provider = OpenAIProvider(_make_cfg(), retry=RetryConfig(max_retries=0))
 
         async def always_timeout(client, messages, model, **kwargs):
             raise httpx.ReadTimeout("")
@@ -308,9 +300,7 @@ class TestCallInstrumentation:
     @pytest.mark.asyncio
     async def test_chat_failure_snapshot_error_type_unknown(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
-        provider = OpenAIProvider(
-            _make_cfg(), retry=RetryConfig(max_retries=0)
-        )
+        provider = OpenAIProvider(_make_cfg(), retry=RetryConfig(max_retries=0))
         _mock_client(provider, _json_app({"error": "boom"}, status_code=500))
 
         with pytest.raises(httpx.HTTPStatusError):
@@ -360,9 +350,7 @@ class TestCallInstrumentation:
     @pytest.mark.asyncio
     async def test_chat_stream_failure_snapshot(self, monkeypatch):
         monkeypatch.setenv("DEEPSEEK_API_KEY", "fake-key")
-        provider = OpenAIProvider(
-            _make_cfg(), retry=RetryConfig(max_retries=0)
-        )
+        provider = OpenAIProvider(_make_cfg(), retry=RetryConfig(max_retries=0))
         _mock_client(provider, _json_app({"error": "boom"}, status_code=500))
 
         with pytest.raises(httpx.HTTPStatusError):
@@ -390,12 +378,13 @@ class TestCallInstrumentation:
             if model == "deepseek-v4-pro":
                 status, payload = 422, {"error": "bad"}
             else:
-                status, payload = 200, {
-                    "choices": [
-                        {"message": {"content": "ok"}, "finish_reason": "stop"}
-                    ],
-                    "model": model,
-                }
+                status, payload = (
+                    200,
+                    {
+                        "choices": [{"message": {"content": "ok"}, "finish_reason": "stop"}],
+                        "model": model,
+                    },
+                )
             await send(
                 {
                     "type": "http.response.start",

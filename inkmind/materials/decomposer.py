@@ -9,9 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
 from typing import Any
-from uuid import UUID, uuid4
 
 from inkmind.llm.client import LLMClient
 from inkmind.models.materials import (
@@ -132,9 +130,7 @@ class MaterialDecomposer:
                 )
 
                 fragments_data = self._parse_response(response.content)
-                fragments = self._validate_and_build(
-                    fragments_data, chunk, source
-                )
+                fragments = self._validate_and_build(fragments_data, chunk, source)
 
                 # 成功
                 self._emit_progress(
@@ -157,9 +153,7 @@ class MaterialDecomposer:
                 continue
             except Exception as e:
                 # LLM 调用异常，直接尝试降级
-                logger.error(
-                    "Chunk %s LLM call failed: %s", chunk.id, e
-                )
+                logger.error("Chunk %s LLM call failed: %s", chunk.id, e)
                 last_error = e
                 continue
 
@@ -218,11 +212,7 @@ class MaterialDecomposer:
     ) -> list[MaterialFragment]:
         """校验并构建 MaterialFragment 列表。"""
         fragments: list[MaterialFragment] = []
-        source_desc = (
-            f"用户导入素材"
-            if source is None
-            else f"用户导入素材（{source.word_count}字）"
-        )
+        source_desc = "用户导入素材" if source is None else f"用户导入素材（{source.word_count}字）"
 
         for i, item in enumerate(fragments_data):
             if not isinstance(item, dict):
@@ -235,9 +225,7 @@ class MaterialDecomposer:
 
             # type 白名单校验
             if raw_type not in FRAGMENT_TYPES:
-                logger.warning(
-                    "Unknown type '%s', downgrading to misc", raw_type
-                )
+                logger.warning("Unknown type '%s', downgrading to misc", raw_type)
                 raw_type = "misc"
 
             # tags
@@ -297,11 +285,7 @@ class MaterialDecomposer:
             content=content,
             type="excerpt",
             tags=["原文"],
-            source=(
-                f"用户导入素材（{source.word_count}字）"
-                if source
-                else "用户导入素材"
-            ),
+            source=(f"用户导入素材（{source.word_count}字）" if source else "用户导入素材"),
             reusability_note="原始文本摘录，可从中提取创作灵感",
             source_quote=None,
         )

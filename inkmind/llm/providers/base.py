@@ -7,10 +7,9 @@ import os
 import statistics
 import time  # latency tracking
 from abc import ABC, abstractmethod
-from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import AsyncGenerator, Callable, Dict, List, Optional, Tuple
+from typing import AsyncGenerator, Callable, Dict, List, Optional
 
 import httpx
 
@@ -24,23 +23,23 @@ from inkmind.models.llm import ProviderConfig, RetryConfig
 
 PRICING: dict[str, dict[str, float]] = {
     # DeepSeek
-    "deepseek-chat":          {"input": 0.00027, "output": 0.00110},
-    "deepseek-reasoner":      {"input": 0.00055, "output": 0.00219},
-    "deepseek-v4-pro":        {"input": 0.00040, "output": 0.00160},
-    "deepseek-v4-flash":      {"input": 0.00015, "output": 0.00060},
+    "deepseek-chat": {"input": 0.00027, "output": 0.00110},
+    "deepseek-reasoner": {"input": 0.00055, "output": 0.00219},
+    "deepseek-v4-pro": {"input": 0.00040, "output": 0.00160},
+    "deepseek-v4-flash": {"input": 0.00015, "output": 0.00060},
     # Claude
-    "claude-sonnet-4":        {"input": 0.00300, "output": 0.01500},
-    "claude-3-opus":          {"input": 0.01500, "output": 0.07500},
-    "claude-3-sonnet":        {"input": 0.00300, "output": 0.01500},
-    "claude-3-haiku":         {"input": 0.00025, "output": 0.00125},
+    "claude-sonnet-4": {"input": 0.00300, "output": 0.01500},
+    "claude-3-opus": {"input": 0.01500, "output": 0.07500},
+    "claude-3-sonnet": {"input": 0.00300, "output": 0.01500},
+    "claude-3-haiku": {"input": 0.00025, "output": 0.00125},
     "claude-sonnet-4-20250514": {"input": 0.00300, "output": 0.01500},
     # GPT
-    "gpt-4o":                 {"input": 0.00250, "output": 0.01000},
-    "gpt-4o-mini":            {"input": 0.00015, "output": 0.00060},
-    "gpt-4":                  {"input": 0.03000, "output": 0.06000},
-    "gpt-3.5-turbo":          {"input": 0.00100, "output": 0.00200},
+    "gpt-4o": {"input": 0.00250, "output": 0.01000},
+    "gpt-4o-mini": {"input": 0.00015, "output": 0.00060},
+    "gpt-4": {"input": 0.03000, "output": 0.06000},
+    "gpt-3.5-turbo": {"input": 0.00100, "output": 0.00200},
     # Ollama（免费/本地，标记极低象征性成本）
-    "ollama":                 {"input": 0.00001, "output": 0.00002},
+    "ollama": {"input": 0.00001, "output": 0.00002},
 }
 
 
@@ -50,12 +49,15 @@ def estimate_cost(model: str, prompt_tokens: int, completion_tokens: int) -> flo
     若模型不在表中，按 deepseek-v4-flash 价格兜底。
     """
     rates = PRICING.get(model, PRICING["deepseek-v4-flash"])
-    return (prompt_tokens / 1000.0) * rates["input"] + (completion_tokens / 1000.0) * rates["output"]
+    return (prompt_tokens / 1000.0) * rates["input"] + (completion_tokens / 1000.0) * rates[
+        "output"
+    ]
 
 
 # ---------------------------------------------------------------------------
 # 数据类
 # ---------------------------------------------------------------------------
+
 
 class RequestCancelledError(RuntimeError):
     """调用方通过 cancel() 主动中断的请求（用于 Stats error_type 分类）。"""
@@ -64,6 +66,7 @@ class RequestCancelledError(RuntimeError):
 @dataclass
 class LLMResponse:
     """LLM 调用统一响应。"""
+
     content: str
     model: str
     provider: str
@@ -78,18 +81,19 @@ class ProviderStats:
     每次 chat() / chat_stream() 调用结束产生一份，追加到
     ``BaseProvider.stats_history`` 并经 sink 汇入 ``LLMClient`` 聚合。
     """
-    provider_name: str          # 实际使用的 Provider（降级后可能是备用）
-    model_name: str             # 实际使用的模型
-    agent_name: str = ""        # 发起调用的 Agent 角色名
-    latency_ms: float = 0.0     # 端到端延迟（毫秒）
-    prompt_tokens: int = 0      # 输入 Token 数
+
+    provider_name: str  # 实际使用的 Provider（降级后可能是备用）
+    model_name: str  # 实际使用的模型
+    agent_name: str = ""  # 发起调用的 Agent 角色名
+    latency_ms: float = 0.0  # 端到端延迟（毫秒）
+    prompt_tokens: int = 0  # 输入 Token 数
     completion_tokens: int = 0  # 输出 Token 数
-    total_tokens: int = 0       # 总 Token 数
-    estimated_cost: float = 0.0 # 估算费用（USD）
-    success: bool = True        # 是否成功
+    total_tokens: int = 0  # 总 Token 数
+    estimated_cost: float = 0.0  # 估算费用（USD）
+    success: bool = True  # 是否成功
     error_type: Optional[str] = None  # 失败时的错误类别
-    degraded: bool = False      # 是否经过降级链
-    retry_count: int = 0        # 重试次数
+    degraded: bool = False  # 是否经过降级链
+    retry_count: int = 0  # 重试次数
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))  # 调用时间
 
 
@@ -160,28 +164,29 @@ class ProviderStatsAccumulator:
     与单次调用快照 ProviderStats 互补：本类提供
     ``LLMClient.get_stats()`` 的 per-Provider 汇总视图。
     """
+
     # 调用计数
     total_calls: int = 0
     successful_calls: int = 0
     failed_calls: int = 0
     fallback_used: int = 0
-    
+
     # 延迟追踪（秒）
     min_latency: float = 0.0
     max_latency: float = 0.0
     avg_latency: float = 0.0
-    
+
     # Token 用量
     total_prompt_tokens: int = 0
     total_completion_tokens: int = 0
     total_tokens: int = 0
-    
+
     # 成本估算（USD）
     estimated_cost: float = 0.0
-    
+
     # 内部字段（不公开）
     _latency_samples: int = 0
-    
+
     def record_success(self, elapsed: float, usage: Optional[Dict[str, int]] = None) -> None:
         """记录一次成功调用的延迟和 Token 用量。"""
         if self._latency_samples == 0:
@@ -191,12 +196,11 @@ class ProviderStatsAccumulator:
         else:
             self.min_latency = min(self.min_latency, elapsed)
             self.max_latency = max(self.max_latency, elapsed)
-            self.avg_latency = (
-                (self.avg_latency * self._latency_samples + elapsed)
-                / (self._latency_samples + 1)
+            self.avg_latency = (self.avg_latency * self._latency_samples + elapsed) / (
+                self._latency_samples + 1
             )
         self._latency_samples += 1
-        
+
         if usage:
             pt = usage.get("prompt_tokens", 0) or 0
             ct = usage.get("completion_tokens", 0) or 0
@@ -256,6 +260,7 @@ async def cleanup_http_clients() -> None:
 # ---------------------------------------------------------------------------
 # 抽象基类
 # ---------------------------------------------------------------------------
+
 
 class BaseProvider(ABC):
     """Provider 抽象基类。
@@ -349,7 +354,11 @@ class BaseProvider(ABC):
 
         def _snap(**kw) -> ProviderStats:
             return self._record_call(
-                model=effective_model, start=call_start, degraded=degraded, agent_name=agent_name, **kw
+                model=effective_model,
+                start=call_start,
+                degraded=degraded,
+                agent_name=agent_name,
+                **kw,
             )
 
         async with self._semaphore:
@@ -382,7 +391,10 @@ class BaseProvider(ABC):
                 except httpx.HTTPStatusError as e:
                     self.stats.failed_calls += 1
                     status = e.response.status_code
-                    if status in self.retry.non_retryable_statuses or attempt == self.retry.max_retries:
+                    if (
+                        status in self.retry.non_retryable_statuses
+                        or attempt == self.retry.max_retries
+                    ):
                         _snap(success=False, error=e, retry_count=attempt)
                         raise
                     last_error = e
@@ -394,7 +406,7 @@ class BaseProvider(ABC):
                         raise
                     last_error = e
 
-            raise RuntimeError(f"All retries exhausted") from last_error
+            raise RuntimeError("All retries exhausted") from last_error
 
     async def chat_stream(
         self,
@@ -414,7 +426,11 @@ class BaseProvider(ABC):
 
         def _snap(**kw) -> ProviderStats:
             return self._record_call(
-                model=effective_model, start=call_start, degraded=degraded, agent_name=agent_name, **kw
+                model=effective_model,
+                start=call_start,
+                degraded=degraded,
+                agent_name=agent_name,
+                **kw,
             )
 
         async with self._semaphore:
@@ -430,7 +446,9 @@ class BaseProvider(ABC):
                         await self._rate_limiter.acquire()
                     self.stats.total_calls += 1
                     start = time.monotonic()
-                    async for chunk in self._do_chat_stream(client, messages, effective_model, **kwargs):
+                    async for chunk in self._do_chat_stream(
+                        client, messages, effective_model, **kwargs
+                    ):
                         yield chunk
                     elapsed = time.monotonic() - start
                     self.stats.record_success(elapsed)
@@ -440,7 +458,10 @@ class BaseProvider(ABC):
                 except httpx.HTTPStatusError as e:
                     self.stats.failed_calls += 1
                     status = e.response.status_code
-                    if status in self.retry.non_retryable_statuses or attempt == self.retry.max_retries:
+                    if (
+                        status in self.retry.non_retryable_statuses
+                        or attempt == self.retry.max_retries
+                    ):
                         _snap(success=False, error=e, retry_count=attempt)
                         raise
                 except (httpx.ConnectError, httpx.RemoteProtocolError, httpx.TimeoutException) as e:
@@ -479,9 +500,7 @@ class BaseProvider(ABC):
         if usage:
             prompt_tokens = usage.get("prompt_tokens", 0) or 0
             completion_tokens = usage.get("completion_tokens", 0) or 0
-            total_tokens = usage.get("total_tokens") or (
-                prompt_tokens + completion_tokens
-            )
+            total_tokens = usage.get("total_tokens") or (prompt_tokens + completion_tokens)
         estimated = estimate_cost(model, prompt_tokens, completion_tokens)
         snapshot = ProviderStats(
             provider_name=self.config.name,
@@ -525,6 +544,7 @@ class BaseProvider(ABC):
 # ---------------------------------------------------------------------------
 # 工具函数
 # ---------------------------------------------------------------------------
+
 
 def extract_api_key_from_env(cfg: ProviderConfig) -> str:
     """从环境变量提取 API Key（无则返回空字符串）。"""

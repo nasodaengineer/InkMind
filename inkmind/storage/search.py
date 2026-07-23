@@ -173,9 +173,7 @@ class FTSManager:
             # 重建
             await self._session.execute(text(FTS5_REBUILD_SQL))
             # 计数
-            result = await self._session.execute(
-                text("SELECT COUNT(*) FROM fragments_fts")
-            )
+            result = await self._session.execute(text("SELECT COUNT(*) FROM fragments_fts"))
             count = result.scalar() or 0
             logger.info("FTS 索引重建完成，共 %s 条", count)
             return {"status": "ok", "count": count}
@@ -270,7 +268,12 @@ class FTSManager:
         count_row = await self._session.execute(text(count_sql), params)
         total = count_row.scalar() or 0
 
-        return {"items": items, "total": total, "page": page_from_params(params), "per_page": params["limit"]}
+        return {
+            "items": items,
+            "total": total,
+            "page": page_from_params(params),
+            "per_page": params["limit"],
+        }
 
     async def _like_search(self, params: dict, query: str) -> dict[str, Any]:
         """LIKE 降级搜索。"""

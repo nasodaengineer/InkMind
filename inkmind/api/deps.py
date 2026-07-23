@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING
 
 from fastapi import Depends
 from fastapi import Request
@@ -10,6 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from inkmind.storage.database import DatabaseManager
 from inkmind.storage.repositories import ChapterRepository, NovelRepository
+
+if TYPE_CHECKING:
+    from inkmind.storage.unit_of_work import UnitOfWork
 
 
 async def get_db(request: Request) -> AsyncGenerator[AsyncSession, None]:

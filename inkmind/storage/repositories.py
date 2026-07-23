@@ -50,8 +50,8 @@ from inkmind.storage.serializers import (
     dict_to_novel,
     dict_to_outline_spine,
     dict_to_pipeline_state,
-dict_to_run,
-dict_to_volume,
+    dict_to_run,
+    dict_to_volume,
     dict_to_world,
     novel_to_dict,
     novel_to_orm,
@@ -59,9 +59,9 @@ dict_to_volume,
     outline_spine_to_orm,
     pipeline_state_to_dict,
     pipeline_state_to_orm,
-run_to_dict,
+    run_to_dict,
     run_to_orm,
-volume_to_dict,
+    volume_to_dict,
     volume_to_orm,
     world_to_dict,
     world_to_orm,
@@ -115,7 +115,33 @@ class ChapterRepository:
     def __init__(self, session: AsyncSession):
         self._session = session
 
+    async def _ensure_volume_id(self, chapter: Chapter) -> None:
+        """确保 chapter 有 volume_id（NOT NULL 约束）。"""
+        if chapter.volume_id is not None:
+            return
+        result = await self._session.execute(
+            select(VolumeModel)
+            .where(VolumeModel.novel_id == str(chapter.novel_id))
+            .order_by(VolumeModel.volume_index)
+            .limit(1)
+        )
+        vol = result.scalar_one_or_none()
+        if vol is None:
+            from uuid import uuid4
+
+            vol = VolumeModel(
+                uuid=str(uuid4()),
+                novel_id=str(chapter.novel_id),
+                volume_index=1,
+                title="默认卷",
+                planned_size=100,
+            )
+            self._session.add(vol)
+            await self._session.flush()
+        chapter.volume_id = UUID(vol.uuid)
+
     async def save(self, chapter: Chapter) -> None:
+        await self._ensure_volume_id(chapter)
         data = chapter_to_orm(chapter)
         result = await self._session.execute(
             select(ChapterModel).where(ChapterModel.uuid == str(chapter.id))
@@ -140,9 +166,7 @@ class ChapterRepository:
             return None
         return dict_to_chapter(chapter_to_dict(model))
 
-    async def get_by_novel_and_index(
-        self, novel_id: UUID, index: int
-    ) -> Chapter | None:
+    async def get_by_novel_and_index(self, novel_id: UUID, index: int) -> Chapter | None:
         result = await self._session.execute(
             select(ChapterModel).where(
                 ChapterModel.novel_id == str(novel_id),
@@ -154,20 +178,16 @@ class ChapterRepository:
             return None
         return dict_to_chapter(chapter_to_dict(model))
 
-    async def get_chapters_by_novel(
-        self, novel_id: UUID
-    ) -> list[Chapter]:
+    async def get_chapters_by_novel(self, novel_id: UUID) -> list[Chapter]:
         result = await self._session.execute(
             select(ChapterModel)
             .where(ChapterModel.novel_id == str(novel_id))
-                .order_by(ChapterModel.chapter_index)
+            .order_by(ChapterModel.chapter_index)
         )
         models = result.scalars().all()
         return [dict_to_chapter(chapter_to_dict(m)) for m in models]
 
-    async def get_versions(
-        self, chapter_id: UUID
-    ) -> list[ChapterVersion]:
+    async def get_versions(self, chapter_id: UUID) -> list[ChapterVersion]:
         result = await self._session.execute(
             select(ChapterVersionModel)
             .where(ChapterVersionModel.chapter_id == str(chapter_id))
@@ -176,9 +196,7 @@ class ChapterRepository:
         models = result.scalars().all()
         return [dict_to_chapter_version(chapter_version_to_dict(m)) for m in models]
 
-    async def update_status(
-        self, novel_id: UUID, chapter_index: int, status: str
-    ) -> None:
+    async def update_status(self, novel_id: UUID, chapter_index: int, status: str) -> None:
         await self._session.execute(
             update(ChapterModel)
             .where(
@@ -188,9 +206,7 @@ class ChapterRepository:
             .values(status=status)
         )
 
-    async def get_chapters_by_volume(
-        self, novel_id: UUID, volume_id: UUID
-    ) -> list[Chapter]:
+    async def get_chapters_by_volume(self, novel_id: UUID, volume_id: UUID) -> list[Chapter]:
         result = await self._session.execute(
             select(ChapterModel)
             .where(
@@ -204,8 +220,7 @@ class ChapterRepository:
 
     async def count_by_volume(self, volume_id: UUID) -> int:
         result = await self._session.execute(
-            select(ChapterModel)
-            .where(
+            select(ChapterModel).where(
                 ChapterModel.volume_id == str(volume_id),
                 ChapterModel.is_deleted == False,
             )
@@ -229,13 +244,18 @@ class ChapterRepository:
         if model is None:
             return None
         allowed = {
-            "title", "summary", "key_events",
-            "rhythm_marker", "pov", "involved",
+            "title",
+            "summary",
+            "key_events",
+            "rhythm_marker",
+            "pov",
+            "involved",
         }
         for k, v in fields.items():
             if k in allowed:
                 setattr(model, k, v)
         await self._session.flush()
+        await self._session.refresh(model)
         return dict_to_chapter(chapter_to_dict(model))
 
 
@@ -266,9 +286,7 @@ class CharacterRepository:
 
     async def get_by_novel(self, novel_id: UUID) -> list[Character]:
         result = await self._session.execute(
-            select(CharacterModel).where(
-                CharacterModel.novel_id == str(novel_id)
-            )
+            select(CharacterModel).where(CharacterModel.novel_id == str(novel_id))
         )
         models = result.scalars().all()
         return [dict_to_character(character_to_dict(m)) for m in models]
@@ -301,9 +319,7 @@ class WorldRepository:
 
     async def get_by_novel(self, novel_id: UUID) -> World | None:
         result = await self._session.execute(
-            select(WorldModel).where(
-                WorldModel.novel_id == str(novel_id)
-            )
+            select(WorldModel).where(WorldModel.novel_id == str(novel_id))
         )
         model = result.scalar_one_or_none()
         if model is None:
@@ -327,9 +343,7 @@ class PipelineStateRepository:
         else:
             self._session.add(PipelineStateModel(**data))
 
-    async def get_by_novel(
-        self, novel_id: UUID
-    ) -> PipelineState | None:
+    async def get_by_novel(self, novel_id: UUID) -> PipelineState | None:
         result = await self._session.execute(
             select(PipelineStateModel).where(PipelineStateModel.novel_id == str(novel_id))
         )
@@ -357,9 +371,7 @@ class RunRepository:
 
     async def save(self, run: Run) -> None:
         data = run_to_orm(run)
-        result = await self._session.execute(
-            select(RunsModel).where(RunsModel.uuid == str(run.id))
-        )
+        result = await self._session.execute(select(RunsModel).where(RunsModel.uuid == str(run.id)))
         existing = result.scalar_one_or_none()
         if existing:
             for k, v in data.items():
@@ -368,9 +380,7 @@ class RunRepository:
             self._session.add(RunsModel(**data))
 
     async def get_by_id(self, run_id: UUID) -> Run | None:
-        result = await self._session.execute(
-            select(RunsModel).where(RunsModel.uuid == str(run_id))
-        )
+        result = await self._session.execute(select(RunsModel).where(RunsModel.uuid == str(run_id)))
         model = result.scalar_one_or_none()
         if model is None:
             return None
@@ -409,23 +419,17 @@ class RunRepository:
 
     async def update_status(self, run_id: UUID, status: str) -> None:
         await self._session.execute(
-            update(RunsModel)
-            .where(RunsModel.uuid == str(run_id))
-            .values(status=status)
+            update(RunsModel).where(RunsModel.uuid == str(run_id)).values(status=status)
         )
 
     async def set_phase(self, run_id: UUID, phase: str) -> None:
         await self._session.execute(
-            update(RunsModel)
-            .where(RunsModel.uuid == str(run_id))
-            .values(phase=phase)
+            update(RunsModel).where(RunsModel.uuid == str(run_id)).values(phase=phase)
         )
 
     async def get_all_running(self) -> list[Run]:
         """获取所有 status=running 的 Run（用于恢复）。"""
-        result = await self._session.execute(
-            select(RunsModel).where(RunsModel.status == "running")
-        )
+        result = await self._session.execute(select(RunsModel).where(RunsModel.status == "running"))
         models = result.scalars().all()
         return [dict_to_run(run_to_dict(m)) for m in models]
 
@@ -457,9 +461,7 @@ class VolumeRepository:
             return None
         return dict_to_volume(volume_to_dict(model))
 
-    async def get_by_novel_and_index(
-        self, novel_id: UUID, volume_index: int
-    ) -> Volume | None:
+    async def get_by_novel_and_index(self, novel_id: UUID, volume_index: int) -> Volume | None:
         result = await self._session.execute(
             select(VolumeModel).where(
                 VolumeModel.novel_id == str(novel_id),
@@ -486,6 +488,7 @@ class VolumeRepository:
             select(VolumeModel)
             .where(VolumeModel.novel_id == str(novel_id))
             .order_by(VolumeModel.volume_index.desc())
+            .limit(1)
         )
         last = result.scalar_one_or_none()
         return (last.volume_index + 1) if last else 1
@@ -519,9 +522,7 @@ class OutlineSpineRepository:
 
     async def get_by_novel(self, novel_id: UUID) -> OutlineSpine | None:
         result = await self._session.execute(
-            select(OutlineSpineModel).where(
-                OutlineSpineModel.novel_id == str(novel_id)
-            )
+            select(OutlineSpineModel).where(OutlineSpineModel.novel_id == str(novel_id))
         )
         model = result.scalar_one_or_none()
         if model is None:
@@ -531,9 +532,7 @@ class OutlineSpineRepository:
     async def upsert(self, spine: OutlineSpine) -> OutlineSpine:
         """创建或更新总纲。"""
         result = await self._session.execute(
-            select(OutlineSpineModel).where(
-                OutlineSpineModel.novel_id == str(spine.novel_id)
-            )
+            select(OutlineSpineModel).where(OutlineSpineModel.novel_id == str(spine.novel_id))
         )
         existing = result.scalar_one_or_none()
         data = outline_spine_to_orm(spine)
@@ -561,7 +560,6 @@ class MaterialSourceRepository:
         self._session = session
 
     async def save(self, source: MaterialSource) -> None:
-        from inkmind.storage.models import MaterialSourceModel
 
         result = await self._session.execute(
             select(MaterialSourceModel).where(MaterialSourceModel.uuid == str(source.id))
@@ -583,7 +581,6 @@ class MaterialSourceRepository:
             self._session.add(MaterialSourceModel(**data))
 
     async def get_by_id(self, source_id: UUID) -> MaterialSource | None:
-        from inkmind.storage.models import MaterialSourceModel
 
         result = await self._session.execute(
             select(MaterialSourceModel).where(MaterialSourceModel.uuid == str(source_id))
@@ -603,7 +600,6 @@ class MaterialSourceRepository:
         )
 
     async def get_by_novel(self, novel_id: UUID) -> list[MaterialSource]:
-        from inkmind.storage.models import MaterialSourceModel
 
         result = await self._session.execute(
             select(MaterialSourceModel)
@@ -628,10 +624,7 @@ class MaterialSourceRepository:
             for m in models
         ]
 
-    async def find_by_digest(
-        self, novel_id: UUID, content_digest: str
-    ) -> MaterialSource | None:
-        from inkmind.storage.models import MaterialSourceModel
+    async def find_by_digest(self, novel_id: UUID, content_digest: str) -> MaterialSource | None:
 
         result = await self._session.execute(
             select(MaterialSourceModel).where(
@@ -655,7 +648,6 @@ class MaterialSourceRepository:
         )
 
     async def soft_delete(self, source_id: UUID) -> bool:
-        from inkmind.storage.models import MaterialSourceModel
 
         result = await self._session.execute(
             select(MaterialSourceModel).where(MaterialSourceModel.uuid == str(source_id))
@@ -679,7 +671,6 @@ class MaterialChunkRepository:
         self._session = session
 
     async def save(self, chunk: MaterialChunk) -> None:
-        from inkmind.storage.models import MaterialChunkModel
 
         result = await self._session.execute(
             select(MaterialChunkModel).where(MaterialChunkModel.uuid == str(chunk.id))
@@ -702,7 +693,6 @@ class MaterialChunkRepository:
             self._session.add(MaterialChunkModel(**data))
 
     async def get_by_id(self, chunk_id: UUID) -> MaterialChunk | None:
-        from inkmind.storage.models import MaterialChunkModel
 
         result = await self._session.execute(
             select(MaterialChunkModel).where(MaterialChunkModel.uuid == str(chunk_id))
@@ -722,7 +712,6 @@ class MaterialChunkRepository:
         )
 
     async def get_by_source(self, source_id: UUID) -> list[MaterialChunk]:
-        from inkmind.storage.models import MaterialChunkModel
 
         result = await self._session.execute(
             select(MaterialChunkModel)
@@ -745,7 +734,6 @@ class MaterialChunkRepository:
         ]
 
     async def get_pending_by_source(self, source_id: UUID) -> list[MaterialChunk]:
-        from inkmind.storage.models import MaterialChunkModel
 
         result = await self._session.execute(
             select(MaterialChunkModel)
@@ -771,7 +759,6 @@ class MaterialChunkRepository:
         ]
 
     async def get_failed_by_source(self, source_id: UUID) -> list[MaterialChunk]:
-        from inkmind.storage.models import MaterialChunkModel
 
         result = await self._session.execute(
             select(MaterialChunkModel)
@@ -809,12 +796,9 @@ class MaterialFragmentRepository:
         self._session = session
 
     async def save(self, fragment: MaterialFragment) -> None:
-        from inkmind.storage.models import MaterialFragmentModel
 
         result = await self._session.execute(
-            select(MaterialFragmentModel).where(
-                MaterialFragmentModel.uuid == str(fragment.id)
-            )
+            select(MaterialFragmentModel).where(MaterialFragmentModel.uuid == str(fragment.id))
         )
         existing = result.scalar_one_or_none()
         data = {
@@ -838,12 +822,9 @@ class MaterialFragmentRepository:
             self._session.add(MaterialFragmentModel(**data))
 
     async def get_by_id(self, fragment_id: UUID) -> MaterialFragment | None:
-        from inkmind.storage.models import MaterialFragmentModel
 
         result = await self._session.execute(
-            select(MaterialFragmentModel).where(
-                MaterialFragmentModel.uuid == str(fragment_id)
-            )
+            select(MaterialFragmentModel).where(MaterialFragmentModel.uuid == str(fragment_id))
         )
         model = result.scalar_one_or_none()
         if model is None:
@@ -872,10 +853,6 @@ class MaterialFragmentRepository:
         offset: int = 0,
         limit: int = 100,
     ) -> list[MaterialFragment]:
-        from inkmind.storage.models import (
-            MaterialFragmentModel,
-            MaterialSourceModel,
-        )
 
         query = (
             select(MaterialFragmentModel)
@@ -888,16 +865,13 @@ class MaterialFragmentRepository:
         if type_filter:
             query = query.where(MaterialFragmentModel.type == type_filter)
         if tag_filter:
-            query = query.where(
-                MaterialFragmentModel.tags.contains(tag_filter)
-            )
+            query = query.where(MaterialFragmentModel.tags.contains(tag_filter))
         query = query.order_by(MaterialFragmentModel.created_at.desc()).offset(offset).limit(limit)
         result = await self._session.execute(query)
         models = result.scalars().all()
         return [_material_fragment_from_orm(m) for m in models]
 
     async def get_by_source(self, source_id: UUID) -> list[MaterialFragment]:
-        from inkmind.storage.models import MaterialFragmentModel
 
         result = await self._session.execute(
             select(MaterialFragmentModel)
@@ -908,7 +882,6 @@ class MaterialFragmentRepository:
         return [_material_fragment_from_orm(m) for m in models]
 
     async def get_by_chunk(self, chunk_id: UUID) -> list[MaterialFragment]:
-        from inkmind.storage.models import MaterialFragmentModel
 
         result = await self._session.execute(
             select(MaterialFragmentModel)
@@ -918,13 +891,9 @@ class MaterialFragmentRepository:
         models = result.scalars().all()
         return [_material_fragment_from_orm(m) for m in models]
 
-    async def delete_by_chunk_except_edited(
-        self, chunk_id: UUID
-    ) -> int:
+    async def delete_by_chunk_except_edited(self, chunk_id: UUID) -> int:
         """删除某 chunk 下所有非 user_edited 的片段，返回删除数。"""
         from sqlalchemy import delete
-
-        from inkmind.storage.models import MaterialFragmentModel
 
         result = await self._session.execute(
             delete(MaterialFragmentModel).where(
@@ -938,22 +907,17 @@ class MaterialFragmentRepository:
         """删除片段。若 skip_if_edited 且 user_edited 为 True 则不删。"""
         from sqlalchemy import delete
 
-        from inkmind.storage.models import MaterialFragmentModel
-
         fragment = await self.get_by_id(fragment_id)
         if fragment is None:
             return False
         if skip_if_edited and fragment.user_edited:
             return False
         await self._session.execute(
-            delete(MaterialFragmentModel).where(
-                MaterialFragmentModel.uuid == str(fragment_id)
-            )
+            delete(MaterialFragmentModel).where(MaterialFragmentModel.uuid == str(fragment_id))
         )
         return True
 
     async def batch_save(self, fragments: list[MaterialFragment]) -> None:
-        from inkmind.storage.models import MaterialFragmentModel
 
         for f in fragments:
             data = {
@@ -984,9 +948,7 @@ class AppSettingsRepository:
     async def get(self) -> dict | None:
         """获取 app_settings 的 JSON 数据。无记录则返回 None。"""
         result = await self._session.execute(
-            select(AppSettingsModel).where(
-                AppSettingsModel.novel_id == self.APP_NOVEL_ID
-            )
+            select(AppSettingsModel).where(AppSettingsModel.novel_id == self.APP_NOVEL_ID)
         )
         model = result.scalar_one_or_none()
         if model is None:
@@ -996,9 +958,7 @@ class AppSettingsRepository:
     async def upsert(self, data: dict) -> None:
         """写入 app_settings（insert or update）。"""
         result = await self._session.execute(
-            select(AppSettingsModel).where(
-                AppSettingsModel.novel_id == self.APP_NOVEL_ID
-            )
+            select(AppSettingsModel).where(AppSettingsModel.novel_id == self.APP_NOVEL_ID)
         )
         existing = result.scalar_one_or_none()
         if existing:
@@ -1032,10 +992,12 @@ class StatsRepository:
         now = datetime.now(timezone.utc)
         if window == "today":
             from datetime import timedelta
+
             start = now - timedelta(days=1)
             return [ProviderStatsModel.timestamp >= start]
         elif window == "7d":
             from datetime import timedelta
+
             start = now - timedelta(days=7)
             return [ProviderStatsModel.timestamp >= start]
         # "all" — 不过滤
@@ -1117,10 +1079,15 @@ class StatsRepository:
 
         from collections import defaultdict
 
-        groups: dict[str, dict] = defaultdict(lambda: {
-            "calls": 0, "total_tokens": 0, "total_cost": 0.0,
-            "latencies": [], "successes": 0,
-        })
+        groups: dict[str, dict] = defaultdict(
+            lambda: {
+                "calls": 0,
+                "total_tokens": 0,
+                "total_cost": 0.0,
+                "latencies": [],
+                "successes": 0,
+            }
+        )
 
         for r in rows:
             key = getattr(r, attr) or "(unknown)"
@@ -1135,14 +1102,16 @@ class StatsRepository:
         result_list = []
         for key, g in groups.items():
             avg_lat = sum(g["latencies"]) / len(g["latencies"]) if g["latencies"] else 0.0
-            result_list.append({
-                dimension: key,
-                "calls": g["calls"],
-                "total_tokens": g["total_tokens"],
-                "total_cost": round(g["total_cost"], 6),
-                "avg_latency_ms": round(avg_lat, 2),
-                "success_rate": round(g["successes"] / g["calls"], 4) if g["calls"] else 0.0,
-            })
+            result_list.append(
+                {
+                    dimension: key,
+                    "calls": g["calls"],
+                    "total_tokens": g["total_tokens"],
+                    "total_cost": round(g["total_cost"], 6),
+                    "avg_latency_ms": round(avg_lat, 2),
+                    "success_rate": round(g["successes"] / g["calls"], 4) if g["calls"] else 0.0,
+                }
+            )
 
         result_list.sort(key=lambda x: x["calls"], reverse=True)
         return result_list
@@ -1151,12 +1120,14 @@ class StatsRepository:
         """获取 Run 历史。"""
         filters = self._window_filter(window)
         from sqlalchemy import select as sa_select
-        query = sa_select(RunsModel).order_by(RunsModel.created_at.desc()).limit(100)
+
+        _query = sa_select(RunsModel).order_by(RunsModel.created_at.desc()).limit(100)
         for f in filters:
             # RunsModel uses created_at field
             pass
         # Rebuild with proper field filter
         from datetime import timedelta
+
         now = datetime.now(timezone.utc)
         q = sa_select(RunsModel)
         if window == "today":
@@ -1184,6 +1155,7 @@ class StatsRepository:
     async def get_compression_tasks(self) -> list[dict]:
         """获取压缩任务列表（含失败任务的高亮信息）。"""
         from sqlalchemy import select as sa_select
+
         result = await self._session.execute(
             sa_select(CompressionTaskModel)
             .order_by(CompressionTaskModel.created_at.desc())

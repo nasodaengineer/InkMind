@@ -7,8 +7,12 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from uuid import UUID, uuid4
+
+if TYPE_CHECKING:
+    from inkmind.storage.models import RunsModel
 
 from inkmind.models.agent import (
     ChapterStatus,
@@ -74,7 +78,9 @@ def novel_to_dict(model: NovelModel) -> dict:
 def dict_to_novel(data: dict) -> Novel:
     meta = data.get("metadata", {})
     return Novel(
-        id=data.get("id", data.get("uuid")) if isinstance(data.get("id"), UUID) else UUID(data["id"]),
+        id=data.get("id", data.get("uuid"))
+        if isinstance(data.get("id"), UUID)
+        else UUID(data["id"]),
         title=data["title"],
         metadata=NovelMetadata(
             description=meta.get("description", ""),
@@ -129,7 +135,9 @@ def chapter_to_dict(model: ChapterModel) -> dict:
 def dict_to_chapter(data: dict) -> Chapter:
     return Chapter(
         id=data["id"] if isinstance(data.get("id"), UUID) else UUID(data["id"]),
-        novel_id=data["novel_id"] if isinstance(data.get("novel_id"), UUID) else UUID(data["novel_id"]),
+        novel_id=data["novel_id"]
+        if isinstance(data.get("novel_id"), UUID)
+        else UUID(data["novel_id"]),
         index=data.get("chapter_index", 0),
         title=data["title"],
         content=data.get("content", ""),
@@ -140,12 +148,16 @@ def dict_to_chapter(data: dict) -> Chapter:
         outline_id=(
             data["outline_id"]
             if isinstance(data.get("outline_id"), UUID)
-            else UUID(data["outline_id"]) if data.get("outline_id") else None
+            else UUID(data["outline_id"])
+            if data.get("outline_id")
+            else None
         ),
         volume_id=(
             data["volume_id"]
             if isinstance(data.get("volume_id"), UUID)
-            else UUID(data["volume_id"]) if data.get("volume_id") else None
+            else UUID(data["volume_id"])
+            if data.get("volume_id")
+            else None
         ),
         rhythm_marker=data.get("rhythm_marker"),
         pov=data.get("pov", ""),
@@ -204,8 +216,12 @@ def chapter_version_to_dict(model: ChapterVersionModel) -> dict:
 def dict_to_chapter_version(data: dict) -> ChapterVersion:
     return ChapterVersion(
         id=data["id"] if isinstance(data.get("id"), UUID) else UUID(data["id"]),
-        chapter_id=data["chapter_id"] if isinstance(data.get("chapter_id"), UUID) else UUID(data["chapter_id"]),
-        novel_id=data["novel_id"] if isinstance(data.get("novel_id"), UUID) else UUID(data["novel_id"]),
+        chapter_id=data["chapter_id"]
+        if isinstance(data.get("chapter_id"), UUID)
+        else UUID(data["chapter_id"]),
+        novel_id=data["novel_id"]
+        if isinstance(data.get("novel_id"), UUID)
+        else UUID(data["novel_id"]),
         version=data["version"],
         index=data.get("chapter_index", 0),
         title=data["title"],
@@ -270,7 +286,9 @@ def dict_to_character(data: dict) -> Character:
     ]
     return Character(
         id=data["id"] if isinstance(data.get("id"), UUID) else UUID(data["id"]),
-        novel_id=data["novel_id"] if isinstance(data.get("novel_id"), UUID) else UUID(data["novel_id"]),
+        novel_id=data["novel_id"]
+        if isinstance(data.get("novel_id"), UUID)
+        else UUID(data["novel_id"]),
         name=data["name"],
         aliases=data.get("aliases", []),
         role=data.get("role", "supporting"),
@@ -342,8 +360,8 @@ def dict_to_world(data: dict) -> World:
     def _parse_faction(f: dict) -> Faction:
         return Faction(**f)
 
-    def _parse_location(l: dict) -> Location:
-        return Location(**l)
+    def _parse_location(loc: dict) -> Location:
+        return Location(**loc)
 
     def _parse_marker(m: dict) -> TimelineMarker:
         return TimelineMarker(**m)
@@ -376,7 +394,9 @@ def dict_to_world(data: dict) -> World:
 
     return World(
         id=data["id"] if isinstance(data.get("id"), UUID) else UUID(data["id"]),
-        novel_id=data["novel_id"] if isinstance(data.get("novel_id"), UUID) else UUID(data["novel_id"]),
+        novel_id=data["novel_id"]
+        if isinstance(data.get("novel_id"), UUID)
+        else UUID(data["novel_id"]),
         title=data.get("title", ""),
         genre_tags=data.get("genre_tags", []),
         setting=data.get("setting", ""),
@@ -385,7 +405,7 @@ def dict_to_world(data: dict) -> World:
         timeline_markers=[_parse_marker(m) for m in (data.get("timeline_markers") or [])],
         power_system=_parse_power(data.get("power_system")),
         magic_system=_parse_magic(data.get("magic_system")),
-        location_tree=[_parse_location(l) for l in (data.get("location_tree") or [])],
+        location_tree=[_parse_location(loc) for loc in (data.get("location_tree") or [])],
         created_at=data.get("created_at"),
         updated_at=data.get("updated_at"),
     )
@@ -403,7 +423,7 @@ def world_to_orm(world: World) -> dict:
         "timeline_markers": [t.model_dump(mode="json") for t in world.timeline_markers],
         "power_system": world.power_system.model_dump(mode="json") if world.power_system else None,
         "magic_system": world.magic_system.model_dump(mode="json") if world.magic_system else None,
-        "location_tree": [l.model_dump(mode="json") for l in world.location_tree],
+        "location_tree": [loc.model_dump(mode="json") for loc in world.location_tree],
     }
 
 
@@ -413,10 +433,7 @@ def world_to_orm(world: World) -> dict:
 
 
 def pipeline_state_to_dict(model: PipelineStateModel) -> dict:
-    chapters = {
-        int(k): ChapterStatus(v)
-        for k, v in (model.chapters_state or {}).items()
-    }
+    chapters = {int(k): ChapterStatus(v) for k, v in (model.chapters_state or {}).items()}
     return {
         "novel_id": UUID(model.novel_id),
         "total_chapters": model.total_chapters,
@@ -450,9 +467,7 @@ def pipeline_state_to_orm(state: PipelineState) -> dict:
     return {
         "novel_id": str(state.novel_id),
         "total_chapters": state.total_chapters,
-        "chapters_state": {
-            str(k): v.value for k, v in state.chapters.items()
-        },
+        "chapters_state": {str(k): v.value for k, v in state.chapters.items()},
         "current_chapter_index": state.current_chapter_index,
         "iteration": state.iteration,
         "max_iterations": state.max_iterations,
@@ -485,11 +500,15 @@ def run_to_dict(model: RunsModel) -> dict:
 def dict_to_run(data: dict) -> Run:
     return Run(
         id=data["id"] if isinstance(data.get("id"), UUID) else UUID(data["id"]),
-        novel_id=data["novel_id"] if isinstance(data.get("novel_id"), UUID) else UUID(data["novel_id"]),
+        novel_id=data["novel_id"]
+        if isinstance(data.get("novel_id"), UUID)
+        else UUID(data["novel_id"]),
         chapter_id=(
             data["chapter_id"]
             if isinstance(data.get("chapter_id"), UUID)
-            else UUID(data["chapter_id"]) if data.get("chapter_id") else None
+            else UUID(data["chapter_id"])
+            if data.get("chapter_id")
+            else None
         ),
         kind=RunKind(data["kind"]) if isinstance(data.get("kind"), str) else data["kind"],
         status=RunStatus(data["status"]) if isinstance(data.get("status"), str) else data["status"],
@@ -544,7 +563,9 @@ def volume_to_dict(model: VolumeModel) -> dict:
 def dict_to_volume(data: dict) -> Volume:
     return Volume(
         id=data["id"] if isinstance(data.get("id"), UUID) else UUID(data["id"]),
-        novel_id=data["novel_id"] if isinstance(data.get("novel_id"), UUID) else UUID(data["novel_id"]),
+        novel_id=data["novel_id"]
+        if isinstance(data.get("novel_id"), UUID)
+        else UUID(data["novel_id"]),
         volume_index=data["volume_index"],
         title=data["title"],
         stage_goal=data.get("stage_goal", ""),
@@ -592,7 +613,9 @@ def outline_spine_to_dict(model: OutlineSpineModel) -> dict:
 
 def dict_to_outline_spine(data: dict) -> OutlineSpine:
     return OutlineSpine(
-        novel_id=data["novel_id"] if isinstance(data.get("novel_id"), UUID) else UUID(data["novel_id"]),
+        novel_id=data["novel_id"]
+        if isinstance(data.get("novel_id"), UUID)
+        else UUID(data["novel_id"]),
         main_line=data.get("main_line", ""),
         core_conflict=data.get("core_conflict", ""),
         ending=data.get("ending", ""),

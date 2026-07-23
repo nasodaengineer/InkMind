@@ -28,33 +28,22 @@ from inkmind.models.agent import (
     ChapterStatus,
     DraftPayload,
     PipelineState,
-    VerdictPayload,
 )
 from inkmind.models.chapter import Chapter, ChapterVersion
 from inkmind.models.character import Character, CharacterTimelineEntry
 from inkmind.models.novel import Novel, NovelMetadata
-from inkmind.models.world import World, Faction, Location, PowerSystem, PowerAbility
+from inkmind.models.world import World, Faction, PowerSystem, PowerAbility
 from inkmind.models.memory import (
-    CompressionTask,
     CompressionTaskStatus,
-    L0Index,
-    L2Archive,
-    L3Archive,
-    SlidingWindowState,
 )
 from inkmind.storage import (
     DatabaseManager,
-    IdempotencyGuard,
     JSONSnapshot,
     RecoveryManager,
     UnitOfWork,
 )
 from inkmind.storage.database import get_manager
 from inkmind.storage.models import (
-    Base,
-    ChapterModel,
-    ChapterVersionModel,
-    ProcessedDigestModel,
     CompressionTaskModel,
     MemoryArchiveModel,
 )
@@ -367,9 +356,7 @@ class TestPlannerPlanning:
 
     async def test_t2_rollback_on_failure(self, uow: UnitOfWork, novel_id: UUID):
         """T2 事务错误时回滚，不留下半残数据."""
-        chapters = [
-            Chapter(id=uuid4(), novel_id=novel_id, index=1, title="半残")
-        ]
+        chapters = [Chapter(id=uuid4(), novel_id=novel_id, index=1, title="半残")]
 
         # 故意传入无效的 PipelineState（novel_id 不匹配）
         wrong_state = PipelineState(
@@ -443,9 +430,7 @@ class TestEditorReview:
             await uow._session.commit()
 
         async with uow.transaction():
-            await uow.t3_editor_complete_review(
-                novel_id, 1, is_approved=True, is_baseline=True
-            )
+            await uow.t3_editor_complete_review(novel_id, 1, is_approved=True, is_baseline=True)
             await uow._session.commit()
 
         async with uow.transaction():
@@ -463,9 +448,7 @@ class TestEditorReview:
 class TestMemoryCompression:
     """T4 事务边界：写入压缩数据 + 标记任务完成."""
 
-    async def test_t4_complete_compression(
-        self, uow: UnitOfWork, novel_id: UUID
-    ):
+    async def test_t4_complete_compression(self, uow: UnitOfWork, novel_id: UUID):
         task_id = uuid4()
         compressed_data = {
             "summaries": [{"chapter": 1, "summary": "主角启程的章节"}],
@@ -512,9 +495,7 @@ class TestMemoryCompression:
         # 验证任务标记为已完成
         async with uow.transaction():
             result = await uow._session.execute(
-                select(CompressionTaskModel).where(
-                    CompressionTaskModel.task_id == str(task_id)
-                )
+                select(CompressionTaskModel).where(CompressionTaskModel.task_id == str(task_id))
             )
             task = result.scalar_one_or_none()
             assert task is not None
@@ -562,9 +543,7 @@ class TestWindowShift:
             assert archive.data["sliding_window"]["current_end"] == 3
             assert archive.data["snapshot"]["last_n_chapters"][0]["summary"] == "启程"
 
-    async def test_t5_window_shift_update(
-        self, uow: UnitOfWork, novel_id: UUID
-    ):
+    async def test_t5_window_shift_update(self, uow: UnitOfWork, novel_id: UUID):
         """二次滑窗更新验证 upsert 语义."""
         sliding_window_v1 = {"current_start": 1, "current_end": 2, "window_size": 2}
         l1_snapshot_v1 = {"last_n_chapters": []}
@@ -627,9 +606,7 @@ class TestIdempotency:
         digest2 = compute_packet_digest(packet)
         assert digest == digest2
 
-    async def test_is_duplicate_and_mark(
-        self, uow: UnitOfWork
-    ):
+    async def test_is_duplicate_and_mark(self, uow: UnitOfWork):
         digest = "abc123" + "x" * 58  # 64 chars total
         packet_id = uuid4()
 
@@ -645,9 +622,7 @@ class TestIdempotency:
         is_dup = await uow.idempotency.is_duplicate(digest)
         assert is_dup
 
-    async def test_is_already_processed_full_flow(
-        self, uow: UnitOfWork, novel_id: UUID
-    ):
+    async def test_is_already_processed_full_flow(self, uow: UnitOfWork, novel_id: UUID):
         packet = AgentPacket(
             packet_id=uuid4(),
             packet_type="draft",
@@ -675,9 +650,7 @@ class TestIdempotency:
         is_dup2, _ = await uow.idempotency.is_already_processed(packet)
         assert is_dup2
 
-    async def test_mark_processed_idempotent(
-        self, uow: UnitOfWork
-    ):
+    async def test_mark_processed_idempotent(self, uow: UnitOfWork):
         """重复标记同一 digest 不报错."""
         digest = "same_digest_" + "x" * 52
         packet_id = uuid4()
@@ -698,14 +671,14 @@ class TestIdempotency:
 class TestFullPipeline:
     """模拟 Writer → Editor → MemoryKeeper 的完整流水线."""
 
-    async def test_full_pipeline_flow(
-        self, uow: UnitOfWork, novel_id: UUID
-    ):
+    async def test_full_pipeline_flow(self, uow: UnitOfWork, novel_id: UUID):
         # ── 准备 ──
         novel = Novel(
             id=novel_id,
             title="星辰之海",
-            metadata=NovelMetadata(description="测试小说", word_count=0, chapter_count=1, status="draft"),
+            metadata=NovelMetadata(
+                description="测试小说", word_count=0, chapter_count=1, status="draft"
+            ),
         )
         chapter = Chapter(
             id=uuid4(),
@@ -735,9 +708,7 @@ class TestFullPipeline:
 
         # ── T3: Editor 批准 ──
         async with uow.transaction():
-            await uow.t3_editor_complete_review(
-                novel_id, 1, is_approved=True, is_baseline=True
-            )
+            await uow.t3_editor_complete_review(novel_id, 1, is_approved=True, is_baseline=True)
             await uow._session.commit()
 
         async with uow.transaction():
@@ -774,9 +745,7 @@ class TestFullPipeline:
         # 验证压缩完成
         async with uow.transaction():
             result = await uow._session.execute(
-                select(CompressionTaskModel).where(
-                    CompressionTaskModel.task_id == str(task_id)
-                )
+                select(CompressionTaskModel).where(CompressionTaskModel.task_id == str(task_id))
             )
             task = result.scalar_one_or_none()
             assert task is not None
@@ -802,9 +771,7 @@ class TestFullPipeline:
             assert archive is not None
             assert archive.data["sliding_window"]["current_end"] == 1
 
-    async def test_pipeline_rollback_on_failure(
-        self, uow: UnitOfWork, novel_id: UUID
-    ):
+    async def test_pipeline_rollback_on_failure(self, uow: UnitOfWork, novel_id: UUID):
         """流水线中途失败时，所有变更回滚."""
         novel = Novel(id=novel_id, title="回滚测试")
         chapter = Chapter(
@@ -845,9 +812,7 @@ class TestFullPipeline:
 class TestJSONSnapshot:
     """JSONSnapshot dump 与 restore."""
 
-    async def test_dump_and_restore(
-        self, db: DatabaseManager, novel_id: UUID, tmp_path: Path
-    ):
+    async def test_dump_and_restore(self, db: DatabaseManager, novel_id: UUID, tmp_path: Path):
         # ── 准备数据 ──
         async with db.session() as session:
             uow = UnitOfWork(session)
@@ -886,7 +851,7 @@ class TestJSONSnapshot:
                 index=1,
                 title="启程",
                 content="旧内容...",
-        content_digest=hashlib.sha256("旧内容...".encode("utf-8")).hexdigest(),
+                content_digest=hashlib.sha256("旧内容...".encode("utf-8")).hexdigest(),
             )
             await uow.chapters.save_version(ver)
 
@@ -924,9 +889,7 @@ class TestJSONSnapshot:
             assert restored_chs[0].title == "启程"
             assert restored_chs[0].is_baseline is True
 
-    async def test_dump_nonexistent_novel(
-        self, db: DatabaseManager, tmp_path: Path
-    ):
+    async def test_dump_nonexistent_novel(self, db: DatabaseManager, tmp_path: Path):
         async with db.session() as session:
             snapshot = JSONSnapshot(session)
             with pytest.raises(ValueError, match="not found"):
@@ -941,9 +904,7 @@ class TestJSONSnapshot:
 class TestRecovery:
     """RecoveryManager 故障恢复."""
 
-    async def test_recover_full_state(
-        self, db: DatabaseManager, novel_id: UUID
-    ):
+    async def test_recover_full_state(self, db: DatabaseManager, novel_id: UUID):
         # ── 准备完整数据 ──
         async with db.session() as session:
             uow = UnitOfWork(session)
@@ -970,7 +931,9 @@ class TestRecovery:
             await uow.pipelines.save(pipeline)
 
             # MemoryArchives (L0, L1, L2, L3)
-            session.add(MemoryArchiveModel(novel_id=str(novel_id), tier="l0_index", data={"chapters": [1]}))
+            session.add(
+                MemoryArchiveModel(novel_id=str(novel_id), tier="l0_index", data={"chapters": [1]})
+            )
             session.add(
                 MemoryArchiveModel(
                     novel_id=str(novel_id),
@@ -1039,18 +1002,14 @@ class TestRecovery:
         # 验证数据库中的任务状态也被重置
         async with db.session() as session:
             result = await session.execute(
-                select(CompressionTaskModel).where(
-                    CompressionTaskModel.task_id == str(task_id)
-                )
+                select(CompressionTaskModel).where(CompressionTaskModel.task_id == str(task_id))
             )
             task = result.scalar_one_or_none()
             assert task is not None
             assert task.status == "pending"
             assert task.started_at is None  # 被重置
 
-    async def test_recover_empty_novel(
-        self, db: DatabaseManager, novel_id: UUID
-    ):
+    async def test_recover_empty_novel(self, db: DatabaseManager, novel_id: UUID):
         """空小说（无额外数据）也能恢复."""
         async with db.session() as session:
             uow = UnitOfWork(session)
@@ -1333,9 +1292,7 @@ class TestChapterVersionManagement:
 class TestPipelineStateManagement:
     """流水线状态的完整生命周期."""
 
-    async def test_pipeline_state_crud(
-        self, uow: UnitOfWork, sample_novel: Novel, novel_id: UUID
-    ):
+    async def test_pipeline_state_crud(self, uow: UnitOfWork, sample_novel: Novel, novel_id: UUID):
         async with uow.transaction():
             await uow.novels.save(sample_novel)
             await uow._session.commit()
@@ -1381,9 +1338,7 @@ class TestPipelineStateManagement:
     ):
         async with uow.transaction():
             await uow.novels.save(sample_novel)
-            await uow.pipelines.save(
-                PipelineState(novel_id=novel_id, total_chapters=1)
-            )
+            await uow.pipelines.save(PipelineState(novel_id=novel_id, total_chapters=1))
             await uow._session.commit()
 
         async with uow.transaction():

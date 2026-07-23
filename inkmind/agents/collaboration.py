@@ -181,8 +181,11 @@ class PlannerAgent:
         resp = await self._llm.chat(
             self.ROLE,
             build_planner_prompt(
-                novel_title, novel_description, previous_summaries,
-                start_index, count,
+                novel_title,
+                novel_description,
+                previous_summaries,
+                start_index,
+                count,
             ),
             system_prompt=PLANNER_SYSTEM_PROMPT,
         )
@@ -255,9 +258,7 @@ class EditorAgent:
     def __init__(self, llm: ChatClient) -> None:
         self._llm = llm
 
-    async def review(
-        self, ctx: ChapterContext, content: str, iteration: int
-    ) -> VerdictPayload:
+    async def review(self, ctx: ChapterContext, content: str, iteration: int) -> VerdictPayload:
         """评审章节内容。解析失败时兜底 approve（不阻塞流水线）。"""
         resp = await self._llm.chat(
             self.ROLE,
@@ -413,22 +414,16 @@ class CollaborationPipeline:
                 )
                 async with uow.transaction():
                     # T2: Planner 完成规划（批量 PLANNED 占位 + PipelineState）
-                    await uow.t2_planner_complete_planning(
-                        planned_chapters, pipeline_state
-                    )
+                    await uow.t2_planner_complete_planning(planned_chapters, pipeline_state)
                     await uow.commit()
                 planned_count = len(new_plans)
 
-            current_plan = next(
-                (p for p in planned_list if p.index == next_index), None
-            )
+            current_plan = next((p for p in planned_list if p.index == next_index), None)
             if current_plan is not None:
                 outline = current_plan.outline
                 if not title:
                     title = current_plan.title
-                stored = await uow.chapters.get_by_novel_and_index(
-                    novel_id, next_index
-                )
+                stored = await uow.chapters.get_by_novel_and_index(novel_id, next_index)
                 if stored is not None and stored.status == ChapterStatus.PLANNED:
                     chapter_id = stored.id
 
@@ -459,9 +454,7 @@ class CollaborationPipeline:
             )
 
         # ── Phase 3: MemoryKeeper 摘要（LLM，事务外） ──
-        summary, key_events = await self.memory_keeper.summarize(
-            next_index, ch_title, content
-        )
+        summary, key_events = await self.memory_keeper.summarize(next_index, ch_title, content)
 
         # ── Phase 4: 事务持久化（T1 → T3 → T4 → T5 → 定稿） ──
         chapter = Chapter(
@@ -496,9 +489,7 @@ class CollaborationPipeline:
                     max_iterations=self._max_iterations,
                 )
             pipeline_state.current_chapter_index = next_index
-            pipeline_state.total_chapters = max(
-                pipeline_state.total_chapters, next_index
-            )
+            pipeline_state.total_chapters = max(pipeline_state.total_chapters, next_index)
             pipeline_state.chapters[next_index] = ChapterStatus.DRAFT_READY
             pipeline_state.iteration = iteration
             await uow.pipelines.save(pipeline_state)
@@ -546,18 +537,14 @@ class CollaborationPipeline:
             await uow.t5_window_shift(novel_id, sliding_window_state, l1_snapshot)
 
             # 定稿
-            await uow.chapters.update_status(
-                novel_id, next_index, ChapterStatus.FINALIZED.value
-            )
+            await uow.chapters.update_status(novel_id, next_index, ChapterStatus.FINALIZED.value)
             pipeline_state.chapters[next_index] = ChapterStatus.FINALIZED
             await uow.pipelines.save(pipeline_state)
 
             # 小说元数据
             novel.metadata.chapter_count = next_index
             novel.metadata.status = "writing"
-            novel.metadata.word_count = (
-                novel.metadata.word_count or 0
-            ) + len(content)
+            novel.metadata.word_count = (novel.metadata.word_count or 0) + len(content)
             await uow.novels.save(novel)
 
             await uow.commit()

@@ -1,0 +1,24 @@
+#!/bin/sh
+# ADR-0012: 提交前代码质量门禁
+
+echo "▶ ruff check..."
+uv run ruff check inkmind/ tests/ --quiet
+if [ $? -ne 0 ]; then
+  echo "❌ ruff 检查未通过，请修复后重新提交"
+  exit 1
+fi
+
+echo "▶ ruff format check..."
+uv run ruff format --check inkmind/ tests/ --quiet
+if [ $? -ne 0 ]; then
+  echo "❌ 代码格式不符合规范，运行 uv run ruff format inkmind/ tests/ 修复"
+  exit 1
+fi
+
+echo "▶ mypy (warning only)..."
+uv run mypy inkmind/ --ignore-missing-imports --explicit-package-bases
+if [ $? -ne 0 ]; then
+  echo "⚠️  mypy 有类型错误（暂不阻塞提交）"
+fi
+
+echo "✓ 门禁通过"

@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import AsyncIterator, Callable, Optional
+from typing import TYPE_CHECKING, AsyncIterator
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,9 +26,13 @@ from inkmind.models.agent import ChapterStatus, PipelineState
 from inkmind.models.chapter import Chapter, ChapterVersion
 from inkmind.models.novel import OutlineSpine
 from inkmind.models.run import Run, RunKind, RunStatus
+
+if TYPE_CHECKING:
+    from inkmind.models.materials import MaterialFragment, MaterialSource
+    from inkmind.models.novel import Volume
+
 from inkmind.storage.idempotency import (
     IdempotencyGuard,
-    compute_packet_digest,
 )
 from inkmind.llm.providers.base import ProviderStats
 from inkmind.storage.models import ProviderStatsModel
@@ -48,7 +52,6 @@ from inkmind.storage.repositories import (
     WorldRepository,
 )
 from inkmind.storage.digest import compute_content_digest
-from inkmind.storage.serializers import dict_to_pipeline_state, pipeline_state_to_orm
 
 
 class UnitOfWork:
@@ -74,9 +77,7 @@ class UnitOfWork:
             session_or_db_path = None
 
         self._session = session_or_db_path
-        self._lock = (
-            FileLock.from_path(db_path, timeout=timeout) if db_path else None
-        )
+        self._lock = FileLock.from_path(db_path, timeout=timeout) if db_path else None
         self.novels = NovelRepository(self._session) if self._session else None
         self.chapters = ChapterRepository(self._session) if self._session else None
         self.characters = CharacterRepository(self._session) if self._session else None
@@ -87,7 +88,9 @@ class UnitOfWork:
         self.spines = OutlineSpineRepository(self._session) if self._session else None
         self.material_sources = MaterialSourceRepository(self._session) if self._session else None
         self.material_chunks = MaterialChunkRepository(self._session) if self._session else None
-        self.material_fragments = MaterialFragmentRepository(self._session) if self._session else None
+        self.material_fragments = (
+            MaterialFragmentRepository(self._session) if self._session else None
+        )
         self.app_settings = AppSettingsRepository(self._session) if self._session else None
         self.idempotency = IdempotencyGuard(self._session) if self._session else None
         self.stats = StatsRepository(self._session) if self._session else None
@@ -372,22 +375,14 @@ class UnitOfWork:
             is_approved: 是否批准
             is_baseline: 是否标记为基线版本
         """
-        new_status = (
-            ChapterStatus.APPROVED
-            if is_approved
-            else ChapterStatus.REVISING
-        )
+        new_status = ChapterStatus.APPROVED if is_approved else ChapterStatus.REVISING
 
         # 更新章节状态
-        await self.chapters.update_status(
-            novel_id, chapter_index, new_status.value
-        )
+        await self.chapters.update_status(novel_id, chapter_index, new_status.value)
 
         # 如果批准且标记基线
         if is_approved and is_baseline:
-            chapter = await self.chapters.get_by_novel_and_index(
-                novel_id, chapter_index
-            )
+            chapter = await self.chapters.get_by_novel_and_index(novel_id, chapter_index)
             if chapter is not None:
                 chapter.is_baseline = True
                 await self.chapters.save(chapter)
@@ -514,7 +509,6 @@ class UnitOfWork:
         Returns:
             新建（或幂等匹配）的 MaterialSource
         """
-        from uuid import uuid4
 
         from inkmind.models.materials import MaterialChunk, MaterialSource
         from inkmind.storage.digest import compute_content_digest
@@ -553,9 +547,7 @@ class UnitOfWork:
         # 4. 字数上限校验
         total_words = sum(len(c) for c in chunks)
         if total_words > max_total_words:
-            raise ValueError(
-                f"素材字数 {total_words} 超过上限 {max_total_words}"
-            )
+            raise ValueError(f"素材字数 {total_words} 超过上限 {max_total_words}")
 
         # 5. 创建 source + chunks
         source = MaterialSource(
@@ -688,9 +680,7 @@ class UnitOfWork:
         if chapter_id is not None:
             existing = await self.runs.get_running_for_chapter(chapter_id)
             if existing is not None:
-                raise ValueError(
-                    f"章节 {chapter_id} 已有正在执行的 Run ({existing.id})"
-                )
+                raise ValueError(f"章节 {chapter_id} 已有正在执行的 Run ({existing.id})")
 
         now = datetime.now(timezone.utc)
         run = Run(
@@ -736,15 +726,19 @@ class UnitOfWork:
             raise ValueError(f"章节 {run.chapter_id} 不存在")
 
         # 归档旧版本（如果有）
-        previous_version = ChapterVersion(
-            chapter_id=chapter.id,
-            novel_id=chapter.novel_id,
-            version=chapter.version,
-            index=chapter.index,
-            title=chapter.title,
-            content=chapter.content,
-            summary=chapter.summary,
-        ) if chapter.content else None
+        previous_version = (
+            ChapterVersion(
+                chapter_id=chapter.id,
+                novel_id=chapter.novel_id,
+                version=chapter.version,
+                index=chapter.index,
+                title=chapter.title,
+                content=chapter.content,
+                summary=chapter.summary,
+            )
+            if chapter.content
+            else None
+        )
 
         # 更新章节内容
         chapter.content = chapter_content

@@ -19,22 +19,15 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import AsyncIterator
+from datetime import datetime
 from uuid import UUID, uuid4
 
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 from inkmind.models.memory import (
     ActiveContext,
-    CharacterStateCard,
-    CompressedEvent,
-    CompressedMemory,
     CompressionGranularity,
-    CompressionMeta,
-    CompressionResult,
-    CompressionTask,
     CompressionTaskStatus,
     CompressStrategy,
     L0Index,
@@ -42,11 +35,8 @@ from inkmind.models.memory import (
     L3Archive,
     MemoryNotification,
     MemoryNotificationPayload,
-    MemorySnapshot,
     SlidingWindowState,
-    TimeRange,
     ForeshadowingMarker,
-    LongTermEntry,
     LongTermEntryType,
 )
 from inkmind.memory.compressor import MemoryKeeperCore, LLMCompressor
@@ -79,7 +69,9 @@ def core(novel_id: UUID, mock_llm: AsyncMock) -> MemoryKeeperCore:
     )
 
 
-def _finalize(core: MemoryKeeperCore, chapter_index: int, title: str | None = None) -> MemoryNotificationPayload:
+def _finalize(
+    core: MemoryKeeperCore, chapter_index: int, title: str | None = None
+) -> MemoryNotificationPayload:
     """Helper: 定稿一章，避免重复样板代码。"""
     return core.on_chapter_finalized(
         chapter_index=chapter_index,
@@ -257,9 +249,18 @@ class TestL1SlidingWindow:
     def test_window_updates_character_states(self, core: MemoryKeeperCore) -> None:
         """定稿携带的角色事件应更新状态卡。"""
         cid = uuid4()
-        _finalize_with_char(core, 1, [
-            {"character_id": str(cid), "name": "林风", "event": "进入洛城", "location": "洛城东门"},
-        ])
+        _finalize_with_char(
+            core,
+            1,
+            [
+                {
+                    "character_id": str(cid),
+                    "name": "林风",
+                    "event": "进入洛城",
+                    "location": "洛城东门",
+                },
+            ],
+        )
 
         sw = core._sliding_window
         assert sw is not None
@@ -272,12 +273,25 @@ class TestL1SlidingWindow:
     def test_character_state_overwrites(self, core: MemoryKeeperCore) -> None:
         """同一角色多次出场时状态卡被覆盖更新。"""
         cid = uuid4()
-        _finalize_with_char(core, 1, [
-            {"character_id": str(cid), "name": "林风", "event": "进入洛城", "location": "洛城东门"},
-        ])
-        _finalize_with_char(core, 2, [
-            {"character_id": str(cid), "event": "在客栈休息", "location": "洛城客栈"},
-        ])
+        _finalize_with_char(
+            core,
+            1,
+            [
+                {
+                    "character_id": str(cid),
+                    "name": "林风",
+                    "event": "进入洛城",
+                    "location": "洛城东门",
+                },
+            ],
+        )
+        _finalize_with_char(
+            core,
+            2,
+            [
+                {"character_id": str(cid), "event": "在客栈休息", "location": "洛城客栈"},
+            ],
+        )
 
         card = core._sliding_window.character_states[cid]
         assert card.recent_action == "在客栈休息"
@@ -490,7 +504,9 @@ class TestExecuteCompression:
         assert core._pending_tasks[task_id].status == CompressionTaskStatus.FAILED
 
     @pytest.mark.asyncio
-    async def test_execute_compression_calls_llm_with_correct_args(self, core: MemoryKeeperCore, mock_llm: AsyncMock) -> None:
+    async def test_execute_compression_calls_llm_with_correct_args(
+        self, core: MemoryKeeperCore, mock_llm: AsyncMock
+    ) -> None:
         """LLMCompressor 被调用时接收正确的策略和章节数据。"""
         for i in range(1, 11):
             _finalize(core, i)
@@ -594,9 +610,18 @@ class TestQueryContext:
     def test_query_character_state(self, core: MemoryKeeperCore) -> None:
         """按 CHARACTER_STATE 类型查询：角色状态卡正确。"""
         cid = uuid4()
-        _finalize_with_char(core, 1, [
-            {"character_id": str(cid), "name": "林风", "event": "进入洛城", "location": "洛城东门"},
-        ])
+        _finalize_with_char(
+            core,
+            1,
+            [
+                {
+                    "character_id": str(cid),
+                    "name": "林风",
+                    "event": "进入洛城",
+                    "location": "洛城东门",
+                },
+            ],
+        )
 
         snapshot = core.build_memory_snapshot(target_chapter=1)
         cards = snapshot.active_context.state_cards
@@ -621,13 +646,21 @@ class TestQueryContext:
         """按 LOCATION_LOG 类型查询：角色位置变更可追踪。"""
         cid = uuid4()
         # 场景1: 林风在洛城
-        _finalize_with_char(core, 1, [
-            {"character_id": str(cid), "name": "林风", "event": "到达", "location": "洛城"},
-        ])
+        _finalize_with_char(
+            core,
+            1,
+            [
+                {"character_id": str(cid), "name": "林风", "event": "到达", "location": "洛城"},
+            ],
+        )
         # 场景2: 林风前往郊外
-        _finalize_with_char(core, 2, [
-            {"character_id": str(cid), "event": "离开", "location": "洛城郊外"},
-        ])
+        _finalize_with_char(
+            core,
+            2,
+            [
+                {"character_id": str(cid), "event": "离开", "location": "洛城郊外"},
+            ],
+        )
 
         snapshot = core.build_memory_snapshot(target_chapter=2)
         card = snapshot.active_context.state_cards[0]
@@ -726,7 +759,9 @@ class TestFixedGranularity:
         assert result.compressed.meta.compression_granularity == CompressionGranularity.FIXED
 
     @pytest.mark.asyncio
-    async def test_fixed_granularity_repeat_trigger(self, novel_id: UUID, mock_llm: AsyncMock) -> None:
+    async def test_fixed_granularity_repeat_trigger(
+        self, novel_id: UUID, mock_llm: AsyncMock
+    ) -> None:
         """固定粒度下第二次达到阈值应再次触发。需要先执行压缩以更新 last_compressed。"""
         strategy = CompressStrategy(default_granularity=5)
         core = MemoryKeeperCore(novel_id=novel_id, strategy=strategy, llm_compressor=mock_llm)
@@ -778,7 +813,7 @@ class TestDynamicWindowExpansion:
         original_expanded_size = core._sliding_window.current_expanded_size
 
         # 定稿第2章时检查伏笔触发扩展
-        result = _finalize(core, 2)
+        _finalize(core, 2)
 
         sw = core._sliding_window
         assert sw.expand_reason is not None
@@ -847,7 +882,9 @@ class TestMultipleCompressionsSnapshot:
     """多次压缩后快照的 L2 记忆裁剪验证。"""
 
     @pytest.mark.asyncio
-    async def test_snapshot_contains_last_3_compressions(self, novel_id: UUID, mock_llm: AsyncMock) -> None:
+    async def test_snapshot_contains_last_3_compressions(
+        self, novel_id: UUID, mock_llm: AsyncMock
+    ) -> None:
         """4次压缩后快照应仅包含最近3条（逆序：最新在最前）。"""
         strategy = CompressStrategy(default_granularity=5)
         core = MemoryKeeperCore(novel_id=novel_id, strategy=strategy, llm_compressor=mock_llm)
@@ -879,9 +916,7 @@ class TestMultipleCompressionsSnapshot:
         assert snapshot.recent_compressed[2].range.end_chapter == 10
 
         # 最早的第1次压缩（1-5章）不应出现在快照中
-        assert not any(
-            cm.range.start_chapter == 1 for cm in snapshot.recent_compressed
-        )
+        assert not any(cm.range.start_chapter == 1 for cm in snapshot.recent_compressed)
 
     @pytest.mark.asyncio
     async def test_snapshot_with_1_compression(self, novel_id: UUID, mock_llm: AsyncMock) -> None:

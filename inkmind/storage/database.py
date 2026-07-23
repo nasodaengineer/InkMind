@@ -49,11 +49,7 @@ class DatabaseManager:
             db_url = "sqlite+aiosqlite:///file::memory:?cache=shared&mode=memory&uri=true"
             poolclass = StaticPool
         else:
-            db_url = (
-                f"sqlite+aiosqlite:///{path}"
-                if not path.startswith("sqlite")
-                else path
-            )
+            db_url = f"sqlite+aiosqlite:///{path}" if not path.startswith("sqlite") else path
             poolclass = NullPool
 
         _engine = create_async_engine(
@@ -91,9 +87,7 @@ class DatabaseManager:
         """
         async with self._engine.begin() as conn:
             # 1. 检测并添加 chapters 新列
-            cols_result = await conn.execute(
-                text("PRAGMA table_info('chapters')")
-            )
+            cols_result = await conn.execute(text("PRAGMA table_info('chapters')"))
             existing_cols = {row[1] for row in cols_result.fetchall()}
 
             new_cols: dict[str, str] = {
@@ -151,8 +145,73 @@ class DatabaseManager:
                     {"vid": vol_uuid, "nid": nid},
                 )
 
+            # 2b. volume_id NOT NULL 表重建（SQLite 不支持 ALTER COLUMN）
+            cols_info = await conn.execute(text("PRAGMA table_info('chapters')"))
+            for row in cols_info.fetchall():
+                if row[1] == "volume_id" and row[3] == 0:  # notnull=0
+                    await conn.execute(
+                        text("""
+                        CREATE TABLE chapters_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            uuid VARCHAR(36) NOT NULL UNIQUE,
+                            novel_id VARCHAR(36) NOT NULL REFERENCES novels(uuid),
+                            chapter_index INTEGER NOT NULL,
+                            title VARCHAR(100) NOT NULL,
+                            content TEXT DEFAULT '',
+                            status VARCHAR(20) DEFAULT 'planned',
+                            summary TEXT DEFAULT '',
+                            key_events JSON DEFAULT '[]',
+                            source_trace VARCHAR(100) DEFAULT '',
+                            outline_id VARCHAR(36),
+                            version INTEGER DEFAULT 1,
+                            is_baseline BOOLEAN DEFAULT 0,
+                            volume_id VARCHAR(36) NOT NULL REFERENCES volumes(uuid),
+                            rhythm_marker VARCHAR(20),
+                            pov VARCHAR(50) NOT NULL DEFAULT '',
+                            involved JSON NOT NULL DEFAULT '[]',
+                            created_at DATETIME DEFAULT (datetime('now')),
+                            updated_at DATETIME DEFAULT (datetime('now')),
+                            is_deleted BOOLEAN DEFAULT 0,
+                            deleted_at DATETIME,
+                            UNIQUE(novel_id, chapter_index)
+                        )
+                    """)
+                    )
+                    await conn.execute(
+                        text("""
+                        INSERT INTO chapters_new SELECT
+                            id, uuid, novel_id, chapter_index, title, content,
+                            status, summary, key_events, source_trace, outline_id,
+                            version, is_baseline, volume_id, rhythm_marker, pov,
+                            involved, created_at, updated_at, is_deleted, deleted_at
+                        FROM chapters
+                    """)
+                    )
+                    await conn.execute(text("DROP TABLE chapters"))
+                    await conn.execute(text("ALTER TABLE chapters_new RENAME TO chapters"))
+                    await conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_chapters_novel_id ON chapters(novel_id)"
+                        )
+                    )
+                    await conn.execute(
+                        text("CREATE INDEX IF NOT EXISTS ix_chapters_status ON chapters(status)")
+                    )
+                    await conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_chapters_volume_id ON chapters(volume_id)"
+                        )
+                    )
+                    await conn.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_chapters_is_deleted ON chapters(is_deleted)"
+                        )
+                    )
+                    break
+
             # 3. Issue #44: 建 FTS5 虚拟表 fragments_fts（素材全文搜索）
             from inkmind.storage.search import FTS5_TABLE_SQL
+
             try:
                 await conn.execute(text(FTS5_TABLE_SQL))
             except Exception:

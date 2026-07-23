@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from uuid import UUID
 
 from sqlalchemy import func, select
 
@@ -44,11 +43,9 @@ class StatusCommand(BaseCommand):
                 return
 
             result = await session.execute(
-                select(PipelineStateModel).where(
-                    PipelineStateModel.novel_id == str(novel_id)
-                )
+                select(PipelineStateModel).where(PipelineStateModel.novel_id == str(novel_id))
             )
-            pipeline = result.scalar_one_or_none()
+            result.scalar_one_or_none()
 
             result = await session.execute(
                 select(
@@ -100,28 +97,45 @@ class StatusCommand(BaseCommand):
             text_fn=lambda d: _format_text(d, args.verbose, chapters),
         )
 
+
 def _format_text(data: dict, verbose: bool, chapters: list) -> str:
     lines = []
-    lines.append(f'📖 {data["title"]}')
+    lines.append(f"📖 {data['title']}")
     if data["description"]:
-        lines.append(f'   {data["description"]}')
-    lines.append(f'  ├ 状态: {data["status"]}')
-    lines.append(f'  ├ 章节: {data["chapters"]["total"]} 总 / {data["chapters"]["finalized"]} 定稿')
+        lines.append(f"   {data['description']}")
+    lines.append(f"  ├ 状态: {data['status']}")
+    lines.append(f"  ├ 章节: {data['chapters']['total']} 总 / {data['chapters']['finalized']} 定稿")
     if data["chapters"]["by_status"]:
         status_parts = []
         for s, c in sorted(data["chapters"]["by_status"].items()):
-            emoji = {"planned": "📋", "writing": "✍️", "draft_ready": "📄", "reviewing": "🔍", "approved": "✅", "finalized": "⭐", "revising": "🔄"}.get(s, "❓")
-            status_parts.append(f'{emoji} {s}: {c}')
-        sp = ' | '.join(status_parts)
-        lines.append(f'  └ 状态分布: {sp}')
+            emoji = {
+                "planned": "📋",
+                "writing": "✍️",
+                "draft_ready": "📄",
+                "reviewing": "🔍",
+                "approved": "✅",
+                "finalized": "⭐",
+                "revising": "🔄",
+            }.get(s, "❓")
+            status_parts.append(f"{emoji} {s}: {c}")
+        sp = " | ".join(status_parts)
+        lines.append(f"  └ 状态分布: {sp}")
     if verbose and chapters:
         lines.append("")
-        lines.append('📑 章节列表:')
+        lines.append("📑 章节列表:")
         for c in chapters:
-            emoji = {"planned": "📋", "writing": "✍️", "draft_ready": "📄", "reviewing": "🔍", "approved": "✅", "finalized": "⭐", "revising": "🔄"}.get(c.status, "❓")
+            emoji = {
+                "planned": "📋",
+                "writing": "✍️",
+                "draft_ready": "📄",
+                "reviewing": "🔍",
+                "approved": "✅",
+                "finalized": "⭐",
+                "revising": "🔄",
+            }.get(c.status, "❓")
             marker = "★" if c.is_baseline else " "
-            wc = f'（{len(c.content)} 字）' if c.content else ""
-            lines.append(f'  {c.chapter_index:>3}. {emoji} {c.title} [{c.status}] {marker} {wc}')
+            wc = f"（{len(c.content)} 字）" if c.content else ""
+            lines.append(f"  {c.chapter_index:>3}. {emoji} {c.title} [{c.status}] {marker} {wc}")
     return "\n".join(lines)
 
 

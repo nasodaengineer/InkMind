@@ -21,7 +21,6 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from inkmind.storage.models import (
-    Base,
     ChapterModel,
     ChapterVersionModel,
     CharacterModel,
@@ -38,9 +37,7 @@ class JSONSnapshot:
     def __init__(self, session: AsyncSession):
         self._session = session
 
-    async def dump(
-        self, novel_id: UUID, output_path: str | Path
-    ) -> Path:
+    async def dump(self, novel_id: UUID, output_path: str | Path) -> Path:
         """导出指定 novel 的全部数据为 JSON 文件。
 
         Returns:
@@ -54,56 +51,24 @@ class JSONSnapshot:
         if novel is None:
             raise ValueError(f"Novel {novel_id} not found")
 
-        chapters = await self._get_all(
-            ChapterModel, novel_id=novel_id_str
-        )
-        chapter_versions = await self._get_all(
-            ChapterVersionModel, novel_id=novel_id_str
-        )
-        characters = await self._get_all(
-            CharacterModel, novel_id=novel_id_str
-        )
-        world = await self._get_first(
-            WorldModel, novel_id=novel_id_str
-        )
-        pipeline = await self._get_first(
-            PipelineStateModel, novel_id=novel_id_str
-        )
-        archives = await self._get_all(
-            MemoryArchiveModel, novel_id=novel_id_str
-        )
+        chapters = await self._get_all(ChapterModel, novel_id=novel_id_str)
+        chapter_versions = await self._get_all(ChapterVersionModel, novel_id=novel_id_str)
+        characters = await self._get_all(CharacterModel, novel_id=novel_id_str)
+        world = await self._get_first(WorldModel, novel_id=novel_id_str)
+        pipeline = await self._get_first(PipelineStateModel, novel_id=novel_id_str)
+        archives = await self._get_all(MemoryArchiveModel, novel_id=novel_id_str)
 
         snapshot = {
             "exported_at": datetime.now(timezone.utc).isoformat(),
             "inkmind_version": "0.1.0",
             "novel_id": novel_id_str,
             "novel": self._model_to_dict(novel, exclude=["id"]),
-            "chapters": [
-                self._model_to_dict(c, exclude=["id"])
-                for c in chapters
-            ],
-            "chapter_versions": [
-                self._model_to_dict(v, exclude=["id"])
-                for v in chapter_versions
-            ],
-            "characters": [
-                self._model_to_dict(c, exclude=["id"])
-                for c in characters
-            ],
-            "world": (
-                self._model_to_dict(world, exclude=["id"])
-                if world
-                else None
-            ),
-            "pipeline_state": (
-                self._model_to_dict(pipeline, exclude=["id"])
-                if pipeline
-                else None
-            ),
-            "memory_archives": [
-                self._model_to_dict(a, exclude=["id"])
-                for a in archives
-            ],
+            "chapters": [self._model_to_dict(c, exclude=["id"]) for c in chapters],
+            "chapter_versions": [self._model_to_dict(v, exclude=["id"]) for v in chapter_versions],
+            "characters": [self._model_to_dict(c, exclude=["id"]) for c in characters],
+            "world": (self._model_to_dict(world, exclude=["id"]) if world else None),
+            "pipeline_state": (self._model_to_dict(pipeline, exclude=["id"]) if pipeline else None),
+            "memory_archives": [self._model_to_dict(a, exclude=["id"]) for a in archives],
         }
 
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -113,9 +78,7 @@ class JSONSnapshot:
         )
         return path
 
-    async def restore(
-        self, input_path: str | Path
-    ) -> UUID:
+    async def restore(self, input_path: str | Path) -> UUID:
         """从 JSON 文件恢复数据。
 
         Returns:
@@ -223,9 +186,7 @@ class JSONSnapshot:
 
         return novel_id
 
-    def _model_to_dict(
-        self, model, exclude: list[str] | None = None
-    ) -> dict:
+    def _model_to_dict(self, model, exclude: list[str] | None = None) -> dict:
         """将 ORM 模型转为普通 dict。"""
         exclude = exclude or []
         result = {}
@@ -238,13 +199,9 @@ class JSONSnapshot:
         return result
 
     async def _get_first(self, model_cls, **filters):
-        result = await self._session.execute(
-            select(model_cls).filter_by(**filters)
-        )
+        result = await self._session.execute(select(model_cls).filter_by(**filters))
         return result.scalar_one_or_none()
 
     async def _get_all(self, model_cls, **filters):
-        result = await self._session.execute(
-            select(model_cls).filter_by(**filters)
-        )
+        result = await self._session.execute(select(model_cls).filter_by(**filters))
         return result.scalars().all()
