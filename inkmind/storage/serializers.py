@@ -7,8 +7,13 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 
 from uuid import UUID
+
+if TYPE_CHECKING:
+    from inkmind.models.annotation import Comment, CommentThread
+    from inkmind.storage.models import CommentThreadModel
 
 from inkmind.models.agent import (
     ChapterStatus,
@@ -440,4 +445,90 @@ def pipeline_state_to_orm(state: PipelineState) -> dict:
         "current_chapter_index": state.current_chapter_index,
         "iteration": state.iteration,
         "max_iterations": state.max_iterations,
+    }
+
+
+# ═══════════════════════════════════════════════════════
+#  CommentThread / Comment（批注）
+# ═══════════════════════════════════════════════════════
+
+
+def comment_thread_to_dict(model: CommentThreadModel) -> dict:
+    comments = []
+    for c in model.comments or []:
+        comments.append({
+            "id": UUID(c.uuid),
+            "author": c.author,
+            "body": c.body,
+            "created_at": c.created_at or datetime.now(timezone.utc),
+        })
+    return {
+        "id": UUID(model.uuid),
+        "novel_id": UUID(model.novel_id),
+        "chapter_id": UUID(model.chapter_id),
+        "intent": model.intent,
+        "status": model.status,
+        "anchor": model.anchor,
+        "comments": comments,
+        "created_at": model.created_at or datetime.now(timezone.utc),
+        "updated_at": model.updated_at or datetime.now(timezone.utc),
+        "resolved_at": model.resolved_at,
+    }
+
+
+def dict_to_comment_thread(data: dict) -> CommentThread:
+    from inkmind.models.annotation import (
+        AnchorFingerprint,
+        Comment,
+        CommentIntent,
+        CommentThread,
+        ThreadStatus,
+    )
+
+    anchor = None
+    if data.get("anchor"):
+        anchor = AnchorFingerprint(**data["anchor"])
+
+    comments = [
+        Comment(
+            id=c["id"] if isinstance(c.get("id"), UUID) else UUID(c["id"]),
+            author=c.get("author", "user"),
+            body=c["body"],
+            created_at=c.get("created_at"),
+        )
+        for c in (data.get("comments") or [])
+    ]
+
+    return CommentThread(
+        id=data["id"] if isinstance(data.get("id"), UUID) else UUID(data["id"]),
+        novel_id=data["novel_id"] if isinstance(data.get("novel_id"), UUID) else UUID(data["novel_id"]),
+        chapter_id=data["chapter_id"] if isinstance(data.get("chapter_id"), UUID) else UUID(data["chapter_id"]),
+        intent=CommentIntent(data.get("intent", "note")),
+        status=ThreadStatus(data.get("status", "open")),
+        anchor=anchor,
+        comments=comments,
+        created_at=data.get("created_at"),
+        updated_at=data.get("updated_at"),
+        resolved_at=data.get("resolved_at"),
+    )
+
+
+def comment_thread_to_orm(thread: CommentThread) -> dict:
+    return {
+        "uuid": str(thread.id),
+        "novel_id": str(thread.novel_id),
+        "chapter_id": str(thread.chapter_id),
+        "intent": thread.intent.value,
+        "status": thread.status.value,
+        "anchor": thread.anchor.model_dump(mode="json") if thread.anchor else None,
+        "resolved_at": thread.resolved_at,
+    }
+
+
+def comment_to_orm(comment: Comment, thread_id: str) -> dict:
+    return {
+        "uuid": str(comment.id),
+        "thread_id": thread_id,
+        "author": comment.author,
+        "body": comment.body,
     }
