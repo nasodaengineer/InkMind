@@ -13,8 +13,7 @@
 from __future__ import annotations
 
 import json
-import os
-from typing import AsyncGenerator, Dict, List, Optional
+from typing import List, Optional
 from uuid import UUID
 
 import httpx

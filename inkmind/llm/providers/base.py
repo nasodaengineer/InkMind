@@ -7,10 +7,9 @@ import os
 import statistics
 import time  # latency tracking
 from abc import ABC, abstractmethod
-from contextlib import asynccontextmanager
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import AsyncGenerator, Callable, Dict, List, Optional, Tuple
+from typing import AsyncGenerator, Callable, Dict, List, Optional
 
 import httpx
 
@@ -356,7 +355,7 @@ class BaseProvider(ABC):
                         raise
                     last_error = e
 
-            raise RuntimeError(f"All retries exhausted") from last_error
+            raise RuntimeError("All retries exhausted") from last_error
 
     async def chat_stream(
         self,

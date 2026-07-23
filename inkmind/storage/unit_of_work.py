@@ -14,7 +14,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
-from typing import AsyncIterator, Callable, Optional
+from typing import AsyncIterator
 from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -25,7 +25,6 @@ from inkmind.models.agent import ChapterStatus, PipelineState
 from inkmind.models.chapter import Chapter, ChapterVersion
 from inkmind.storage.idempotency import (
     IdempotencyGuard,
-    compute_packet_digest,
 )
 from inkmind.storage.repositories import (
     ChapterRepository,
@@ -35,7 +34,7 @@ from inkmind.storage.repositories import (
     WorldRepository,
 )
 from inkmind.storage.digest import compute_content_digest
-from inkmind.storage.serializers import dict_to_pipeline_state, pipeline_state_to_orm
+from inkmind.errors import StaleVersionError
 
 
 class UnitOfWork:
@@ -304,6 +303,114 @@ class UnitOfWork:
                     },
                 )
             )
+
+    # ═══════════════════════════════════════════════════
+    #  T12: 手动编辑落稿（人工门）
+    # ═══════════════════════════════════════════════════
+
+    async def t12_manual_edit(
+        self,
+        chapter_id: UUID,
+        new_content: str,
+        base_digest: str,
+        source_trace: str = "manual",
+    ) -> Chapter:
+        """T12: 手动编辑落稿。
+
+        三方原子：归档旧版 + 写章 + fingerprint_updates。
+        base_digest 校验在事务内，冲突即抛 StaleVersionError（409）。
+        不走 T1 content-digest 全局去重——改回旧文不吞。
+
+        Args:
+            chapter_id: 章节 UUID
+            new_content: 新正文
+            base_digest: 客户端编辑前拿到的 content_digest
+            source_trace: 来源标记，默认 "manual"
+
+        Returns:
+            更新后的 Chapter
+
+        Raises:
+            StaleVersionError: base_digest 与服务端不一致
+            ValueError: 章节不存在
+        """
+        chapter = await self.chapters.get_by_id(chapter_id)
+        if chapter is None:
+            raise ValueError(f"章节不存在: {chapter_id}")
+
+        # 1. base_digest 乐观锁校验（事务内）
+        current_digest = compute_content_digest(chapter.content)
+        if base_digest != current_digest:
+            raise StaleVersionError(expected=base_digest, actual=current_digest)
+
+        # 2. 归档旧版
+        old_version = ChapterVersion(
+            chapter_id=chapter.id,
+            novel_id=chapter.novel_id,
+            version=chapter.version,
+            index=chapter.index,
+            title=chapter.title,
+            content=chapter.content,
+            summary=chapter.summary,
+            key_events=chapter.key_events,
+            source_trace=chapter.source_trace,
+            is_baseline=chapter.is_baseline,
+            content_digest=current_digest,
+        )
+        await self.chapters.save_version(old_version)
+
+        # 3. 写入新内容 + fingerprint_updates
+        new_digest = compute_content_digest(new_content)
+        chapter.content = new_content
+        chapter.version += 1
+        chapter.source_trace = source_trace
+        chapter.content_digest = new_digest
+        await self.chapters.save(chapter)
+
+        return chapter
+
+    async def patch_chapter(
+        self,
+        chapter_id: UUID,
+        *,
+        content: str | None = None,
+        base_digest: str | None = None,
+        title: str | None = None,
+        summary: str | None = None,
+        key_events: list[str] | None = None,
+    ) -> Chapter:
+        """PATCH 一端两用：含 content → T12；否则大纲字段单行写。
+
+        Args:
+            chapter_id: 章节 UUID
+            content: 新正文（有则走 T12）
+            base_digest: 乐观锁摘要（content 有值时必传）
+            title: 新标题（可选）
+            summary: 新摘要（可选）
+            key_events: 新关键事件（可选）
+
+        Returns:
+            更新后的 Chapter
+        """
+        if content is not None:
+            if base_digest is None:
+                raise ValueError("手动编辑必须提供 base_digest")
+            return await self.t12_manual_edit(
+                chapter_id, content, base_digest
+            )
+
+        chapter = await self.chapters.get_by_id(chapter_id)
+        if chapter is None:
+            raise ValueError(f"章节不存在: {chapter_id}")
+
+        if title is not None:
+            chapter.title = title
+        if summary is not None:
+            chapter.summary = summary
+        if key_events is not None:
+            chapter.key_events = key_events
+        await self.chapters.save(chapter)
+        return chapter
 
     # ═══════════════════════════════════════════════════
     #  通用

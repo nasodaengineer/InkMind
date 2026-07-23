@@ -5,7 +5,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from inkmind.llm.providers.base import ProviderStatsAccumulator
 

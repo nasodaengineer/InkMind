@@ -114,6 +114,7 @@ def chapter_to_dict(model: ChapterModel) -> dict:
         "outline_id": _to_uuid(model.outline_id),
         "version": model.version,
         "is_baseline": model.is_baseline,
+        "content_digest": model.content_digest or "",
         "created_at": model.created_at or datetime.now(timezone.utc),
         "updated_at": model.updated_at or datetime.now(timezone.utc),
     }
@@ -137,6 +138,7 @@ def dict_to_chapter(data: dict) -> Chapter:
         ),
         version=data.get("version", 1),
         is_baseline=data.get("is_baseline", False),
+        content_digest=data.get("content_digest", ""),
         created_at=data.get("created_at"),
         updated_at=data.get("updated_at"),
     )
@@ -156,6 +158,7 @@ def chapter_to_orm(chapter: Chapter) -> dict:
         "outline_id": _to_str(chapter.outline_id) if chapter.outline_id else None,
         "version": chapter.version,
         "is_baseline": chapter.is_baseline,
+        "content_digest": chapter.content_digest,
     }
 
 

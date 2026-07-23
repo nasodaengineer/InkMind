@@ -21,7 +21,7 @@ from uuid import UUID
 from sqlalchemy import select, update as sa_update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from inkmind.models.agent import ChapterStatus, PipelineState
+from inkmind.models.agent import PipelineState
 from inkmind.models.memory import (
     CompressionTask,
     CompressionTaskStatus,

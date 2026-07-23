@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import shutil
@@ -277,7 +276,6 @@ class TestWrite:
 
     def test_write_uuid_no_collision(self, temp_db_dir):
         """两本不同小说的同序号章节 → UUID 不同（T02 防止碰撞）。"""
-        from uuid import UUID
         db = os.path.join(temp_db_dir, "write_uuid_collision.db")
 
         # 第一本小说

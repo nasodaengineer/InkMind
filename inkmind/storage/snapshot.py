@@ -21,7 +21,6 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from inkmind.storage.models import (
-    Base,
     ChapterModel,
     ChapterVersionModel,
     CharacterModel,
@@ -161,10 +160,10 @@ class JSONSnapshot:
                     """
                     INSERT OR REPLACE INTO chapters
                     (uuid, novel_id, chapter_index, title, content, status, summary, key_events,
-                     source_trace, outline_id, version, is_baseline, created_at, updated_at,
+                     source_trace, outline_id, version, is_baseline, content_digest, created_at, updated_at,
                      is_deleted, deleted_at)
                     VALUES (:uuid, :novel_id, :chapter_index, :title, :content, :status, :summary,
-                     :key_events, :source_trace, :outline_id, :version, :is_baseline, :created_at, :updated_at,
+                     :key_events, :source_trace, :outline_id, :version, :is_baseline, :content_digest, :created_at, :updated_at,
                      :is_deleted, :deleted_at)
                     """
                 ),
@@ -181,6 +180,7 @@ class JSONSnapshot:
                     "outline_id": ch_data.get("outline_id"),
                     "version": ch_data.get("version", 1),
                     "is_baseline": ch_data.get("is_baseline", False),
+                    "content_digest": ch_data.get("content_digest", ""),
                     "created_at": ch_data.get("created_at"),
                     "updated_at": ch_data.get("updated_at"),
                     "is_deleted": ch_data.get("is_deleted", False),
