@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import shutil
@@ -93,7 +92,9 @@ class TestInit:
     def test_init_success(self, temp_db_dir):
         """成功创建新小说。"""
         db = os.path.join(temp_db_dir, "test_init.db")
-        result = _cli("init", "--title", "测试小说", "--description", "这是一本测试小说", f"--db={db}")
+        result = _cli(
+            "init", "--title", "测试小说", "--description", "这是一本测试小说", f"--db={db}"
+        )
         assert result.returncode == 0
         assert "已创建" in result.stdout
         assert "novel_id" in result.stdout or "小说 ID" in result.stdout
@@ -185,6 +186,7 @@ class TestPipeline:
         assert result.returncode == 0, f"next 失败: {result.stderr}"
         # DEBUG: 直接查 DB
         import sqlite3
+
         _conn = sqlite3.connect(db)
         _cur = _conn.cursor()
         _cur.execute("SELECT novel_id, chapter_index, title, status FROM chapters")
@@ -256,7 +258,7 @@ class TestWrite:
     def test_write_success(self, temp_db_dir):
         """创建章节。"""
         db = os.path.join(temp_db_dir, "write.db")
-        
+
         # 先创建小说
         init_result = _cli("init", "--title", "写测试", f"--db={db}")
         assert init_result.returncode == 0
@@ -277,7 +279,6 @@ class TestWrite:
 
     def test_write_uuid_no_collision(self, temp_db_dir):
         """两本不同小说的同序号章节 → UUID 不同（T02 防止碰撞）。"""
-        from uuid import UUID
         db = os.path.join(temp_db_dir, "write_uuid_collision.db")
 
         # 第一本小说

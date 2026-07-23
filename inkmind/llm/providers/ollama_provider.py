@@ -102,6 +102,7 @@ class OllamaProvider(BaseProvider):
                 if json_str == "[DONE]":
                     break
                 import json
+
                 chunk = json.loads(json_str)
                 delta = chunk.get("choices", [{}])[0].get("delta", {})
                 content = delta.get("content", "")

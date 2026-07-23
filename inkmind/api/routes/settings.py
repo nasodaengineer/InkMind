@@ -25,6 +25,7 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 class ProviderItem(BaseModel):
     """Provider 配置项（API Key 仅暴露有无标记）。"""
+
     name: str
     protocol: str
     base_url: str
@@ -37,6 +38,7 @@ class ProviderItem(BaseModel):
 
 class ModelBindingItem(BaseModel):
     """Agent → 模型绑定项。"""
+
     agent_role: str
     primary_model: str
     fallback_models: list[str]
@@ -44,6 +46,7 @@ class ModelBindingItem(BaseModel):
 
 class RetryConfigItem(BaseModel):
     """重试配置（只读展示）。"""
+
     max_retries: int
     base_delay_s: float
     non_retryable_statuses: list[int]
@@ -51,6 +54,7 @@ class RetryConfigItem(BaseModel):
 
 class SettingsResponse(BaseModel):
     """完整设置响应。"""
+
     providers: dict[str, ProviderItem]
     model_router: dict  # {bindings: [...]}
     retry: RetryConfigItem
@@ -59,6 +63,7 @@ class SettingsResponse(BaseModel):
 
 class SettingsUpdateRequest(BaseModel):
     """保存设置请求体。"""
+
     providers: dict
     model_router: dict
     retry: dict
@@ -71,6 +76,7 @@ class SettingsUpdateRequest(BaseModel):
 def _is_api_key_set(api_key_env: str) -> str | None:
     """检查环境变量中是否有对应 API Key。"""
     import os
+
     return "已设置" if api_key_env and os.environ.get(api_key_env) else None
 
 
@@ -90,14 +96,16 @@ def _build_settings_response(config: LLMConfig) -> SettingsResponse:
         )
     return SettingsResponse(
         providers=providers,
-        model_router={"bindings": [
-            {
-                "agent_role": b.agent_role,
-                "primary_model": b.primary_model,
-                "fallback_models": list(b.fallback_models),
-            }
-            for b in config.router.bindings
-        ]},
+        model_router={
+            "bindings": [
+                {
+                    "agent_role": b.agent_role,
+                    "primary_model": b.primary_model,
+                    "fallback_models": list(b.fallback_models),
+                }
+                for b in config.router.bindings
+            ]
+        },
         retry=RetryConfigItem(
             max_retries=config.retry.max_retries,
             base_delay_s=config.retry.base_delay_s,
@@ -216,6 +224,9 @@ async def get_provider_models(
     result: dict[str, list[str]] = {}
     for name, pc in config.providers.items():
         result[name] = list(pc.models)
-    return {"providers": result, "all_models": _collect_all_models(
-        {"providers": {n: {"models": p.models} for n, p in config.providers.items()}}
-    )}
+    return {
+        "providers": result,
+        "all_models": _collect_all_models(
+            {"providers": {n: {"models": p.models} for n, p in config.providers.items()}}
+        ),
+    }

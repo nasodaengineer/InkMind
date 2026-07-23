@@ -41,6 +41,59 @@ export interface ChapterItem {
   word_count: number
 }
 
+export interface ChapterDetail {
+  id: string
+  index: number
+  title: string
+  content: string
+  status: string
+  summary: string
+  version: number
+  word_count: number
+  updated_at: string
+}
+
+export interface FinalizeResponse {
+  id: string
+  index: number
+  title: string
+  status: string
+  version: number
+  word_count: number
+}
+
+export interface VersionItem {
+  id: string
+  version: number
+  title: string
+  content: string
+  source_trace: string
+  is_baseline: boolean
+  created_at: string
+  word_count: number
+}
+
+export interface VersionListResponse {
+  versions: VersionItem[]
+  current_version: number
+}
+
+export interface DiffLine {
+  tag: "equal" | "insert" | "delete"
+  text: string
+}
+
+export interface VersionDiffResponse {
+  from_version: number
+  to_version: number
+  paragraphs: DiffLine[][]
+}
+
+export interface StartRunRequest {
+  kind: string
+  chapter_id?: string | null
+}
+
 export interface VolumeItem {
   id: string
   novel_id: string
@@ -52,6 +105,8 @@ export interface VolumeItem {
   volume_cliffhanger: string
   planned_size: number
   chapter_count: number
+  start_index: number
+  end_index: number
   created_at: string
   updated_at: string
 }
@@ -78,6 +133,7 @@ export interface ChapterOutlineItem {
   pov: string
   involved: string[]
   volume_id?: string | null
+  foreshadowing_count?: number
 }
 
 export interface VolumeSpineResponse {
@@ -137,6 +193,42 @@ export const FRAGMENT_TYPES = [
   "technique",
   "misc",
 ] as const
+
+// ── AI Planner Types (Issue #42) ──
+
+export type PlanLevel = "spine" | "volume" | "chapter" | "split_volumes"
+
+export interface RunItem {
+  id: string
+  novel_id: string
+  chapter_id: string | null
+  kind: string
+  status: string
+  phase: string
+  partial_content: string
+  llm_stats: Record<string, unknown>
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface StartRunPlannerParams {
+  level?: PlanLevel
+  prompt?: string
+  volume_count?: number
+  confirm_overwrite?: boolean
+  volume_id?: string
+  chapter_count?: number
+}
+
+export interface RunSSEEvent {
+  /** phase / token / verdict / result / done / error */
+  event: string
+  data: unknown
+}
+
+export type SSECallback = (event: RunSSEEvent) => void
 
 // ── Settings Types ──
 
@@ -250,7 +342,29 @@ export const api = {
     list: (novelId: string) =>
       request<ChapterItem[]>(`/novels/${novelId}/chapters`),
 
+    get: (novelId: string, chapterId: string) =>
+      request<ChapterDetail>(`/novels/${novelId}/chapters/${chapterId}`),
+
     patch: (
+      novelId: string,
+      chapterIndex: number,
+      data: {
+        title?: string
+        content?: string
+        status?: string
+        summary?: string
+        key_events?: string[]
+        rhythm_marker?: string | null
+        pov?: string
+        involved?: string[]
+      },
+    ) =>
+      request<ChapterDetail>(
+        `/novels/${novelId}/chapters/${chapterIndex}`,
+        { method: "PATCH", body: JSON.stringify(data) },
+      ),
+
+    patchOutline: (
       novelId: string,
       chapterIndex: number,
       data: {
@@ -262,9 +376,25 @@ export const api = {
         involved?: string[]
       },
     ) =>
-      request<ChapterOutlineItem>(
-        `/novels/${novelId}/chapters/${chapterIndex}`,
+      request<ChapterDetail>(
+        `/novels/${novelId}/chapters/${chapterIndex}/outline`,
         { method: "PATCH", body: JSON.stringify(data) },
+      ),
+
+    finalize: (novelId: string, chapterIndex: number) =>
+      request<FinalizeResponse>(
+        `/novels/${novelId}/chapters/${chapterIndex}/finalize`,
+        { method: "POST" },
+      ),
+
+    versions: (novelId: string, chapterId: string) =>
+      request<VersionListResponse>(
+        `/novels/${novelId}/chapters/${chapterId}/versions`,
+      ),
+
+    diff: (novelId: string, chapterId: string, fromVersion: number, toVersion: number) =>
+      request<VersionDiffResponse>(
+        `/novels/${novelId}/chapters/${chapterId}/versions/diff?from_version=${fromVersion}&to_version=${toVersion}`,
       ),
   },
 
@@ -439,4 +569,157 @@ export const api = {
     compressionTasks: () =>
       request<CompressionTaskItem[]>("/stats/compression-tasks"),
   },
+
+  // ── AI Planner (Issue #42) ──
+
+  planner: {
+    /** 起草总纲 */
+    draftSpine: (novelId: string, params?: { prompt?: string; confirm_overwrite?: boolean }) =>
+      api.runs.startPlan(novelId, {
+        kind: "plan",
+        level: "spine",
+        ...params,
+      }),
+
+    /** 填补单卷 */
+    draftVolume: (novelId: string, volumeId: string, params?: { prompt?: string; confirm_overwrite?: boolean }) =>
+      api.runs.startPlan(novelId, {
+        kind: "plan",
+        level: "volume",
+        volume_id: volumeId,
+        ...params,
+      }),
+
+    /** 全书拆卷 */
+    splitVolumes: (novelId: string, volumeCount: number, params?: { prompt?: string }) =>
+      api.runs.startPlan(novelId, {
+        kind: "plan",
+        level: "split_volumes",
+        volume_count: volumeCount,
+        ...params,
+      }),
+
+    /** 卷内批量排章 */
+    planChapters: (novelId: string, volumeId: string, chapterCount: number, params?: { prompt?: string }) =>
+      api.runs.startPlan(novelId, {
+        kind: "plan",
+        level: "chapter",
+        volume_id: volumeId,
+        chapter_count: chapterCount,
+        ...params,
+      }),
+  },
+
+  // ── Runs (Issue #42: 含 planner 参数) ──
+
+  runs: {
+    list: (novelId: string) =>
+      request<{ runs: RunItem[] }>(`/novels/${novelId}/runs`),
+
+    get: (novelId: string, runId: string) =>
+      request<RunItem>(`/novels/${novelId}/runs/${runId}`),
+
+    /** 启动 run（通用，kind=generate 用于写作生成） */
+    start: (novelId: string, params: StartRunRequest) =>
+      request<RunItem>(`/novels/${novelId}/runs`, {
+        method: "POST",
+        body: JSON.stringify(params),
+      }),
+
+    /** 启动 planner run */
+    startPlan: (novelId: string, params: StartRunPlannerParams & { kind: string; chapter_id?: string }) =>
+      request<RunItem>(`/novels/${novelId}/runs`, {
+        method: "POST",
+        body: JSON.stringify({
+          kind: "plan",
+          chapter_id: params.chapter_id || null,
+          level: params.level || "chapter",
+          prompt: params.prompt || null,
+          volume_count: params.volume_count || null,
+          confirm_overwrite: params.confirm_overwrite || false,
+          volume_id: params.volume_id || null,
+          chapter_count: params.chapter_count || null,
+        }),
+      }),
+
+    cancel: (novelId: string, runId: string) =>
+      request<RunItem>(`/novels/${novelId}/runs/${runId}/cancel`, {
+        method: "POST",
+      }),
+  },
+}
+
+// ── SSE ──
+
+/**
+ * 连接到 Run SSE 流。
+ * 返回一个 abort 函数用于断开连接。
+ *
+ * 事件类型:
+ *   - phase:    阶段变更 { phase: "planning|writing|reviewing|complete" }
+ *   - token:    流式 token 分片
+ *   - verdict:  评审结论 { verdict: "approve|needs_revision" }
+ *   - result:   规划结果 { level, data }
+ *   - done:     执行完成 { status: "completed|failed|cancelled|awaiting_human" }
+ *   - error:    执行错误 { message }
+ */
+export function connectRunStream(
+  novelId: string,
+  runId: string,
+  callbacks: {
+    onPhase?: (phase: string) => void
+    onToken?: (token: string) => void
+    onVerdict?: (verdict: string) => void
+    onResult?: (result: unknown) => void
+    onDone?: (status: string) => void
+    onError?: (message: string) => void
+  },
+): () => void {
+  const url = `${BASE}/novels/${novelId}/runs/${runId}/stream`
+  const source = new EventSource(url)
+
+  source.addEventListener("phase", (e: MessageEvent) => {
+    const data = JSON.parse(e.data)
+    callbacks.onPhase?.(data.phase)
+  })
+
+  source.addEventListener("verdict", (e: MessageEvent) => {
+    const data = JSON.parse(e.data)
+    callbacks.onVerdict?.(data.verdict)
+  })
+
+  source.addEventListener("result", (e: MessageEvent) => {
+    const data = JSON.parse(e.data)
+    callbacks.onResult?.(data)
+  })
+
+  source.addEventListener("done", (e: MessageEvent) => {
+    const data = JSON.parse(e.data)
+    callbacks.onDone?.(data.status)
+    source.close()
+  })
+
+  source.addEventListener("error", (e: MessageEvent) => {
+    try {
+      const data = JSON.parse(e.data)
+      callbacks.onError?.(data.message || "未知错误")
+    } catch {
+      callbacks.onError?.("SSE 连接错误")
+    }
+    source.close()
+  })
+
+  // 处理 token 事件（普通消息，无 event 字段）
+  source.onmessage = (e: MessageEvent) => {
+    try {
+      const data = JSON.parse(e.data)
+      if (typeof data === "string") {
+        callbacks.onToken?.(data)
+      }
+    } catch {
+      // 不是 JSON（如心跳），忽略
+    }
+  }
+
+  return () => source.close()
 }

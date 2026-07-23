@@ -18,7 +18,9 @@ class AnthropicProvider(BaseProvider):
 
     def __init__(self, config: ProviderConfig, retry: Optional[RetryConfig] = None) -> None:
         if config.protocol != ProviderProtocol.ANTHROPIC:
-            raise ValueError(f"AnthropicProvider requires ANTHROPIC protocol, got {config.protocol}")
+            raise ValueError(
+                f"AnthropicProvider requires ANTHROPIC protocol, got {config.protocol}"
+            )
         super().__init__(config, retry)
 
     def _build_headers(self) -> Dict[str, str]:
@@ -120,6 +122,7 @@ class AnthropicProvider(BaseProvider):
                 if json_str == "[DONE]":
                     break
                 import json
+
                 chunk = json.loads(json_str)
                 if chunk.get("type") == "content_block_delta":
                     delta = chunk.get("delta", {})

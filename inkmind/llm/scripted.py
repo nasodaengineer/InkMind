@@ -140,6 +140,16 @@ class ScriptedLLMClient:
         """清空会话 Stats 历史。"""
         self._stats_history.clear()
 
+    def get_raw_stats(self) -> list[ProviderStats]:
+        """返回原始 ProviderStats 列表（接口与 LLMClient 对齐）。"""
+        return list(self._stats_history)
+
+    def cancel_all(self) -> None:
+        """离线客户端无进行中请求，空操作（接口对齐）。"""
+
+    async def shutdown(self) -> None:
+        """离线客户端无 HTTP 连接，空操作（接口对齐）。"""
+
     # ── 内部 ──────────────────────────────────────────────
 
     def _next_content(self, agent_role: str, prompt: str) -> str:
@@ -170,10 +180,7 @@ class ScriptedLLMClient:
         return '{"verdict": "approve", "issues": []}'
 
     def _default_memory_keeper(self, prompt: str) -> str:
-        return (
-            '{"summary": "离线演示摘要：本章已定稿，情节按计划推进", '
-            '"key_events": ["章节完成"]}'
-        )
+        return '{"summary": "离线演示摘要：本章已定稿，情节按计划推进", "key_events": ["章节完成"]}'
 
     def _default_planner(self, prompt: str) -> str:
         # 从 prompt 解析起始章节序号（build_planner_prompt 输出「起始章节序号：N」），

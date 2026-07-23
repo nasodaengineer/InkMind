@@ -48,15 +48,11 @@ class IdempotencyGuard:
     async def is_duplicate(self, digest: str) -> bool:
         """检查 digest 是否已被处理过。"""
         result = await self._session.execute(
-            select(ProcessedDigestModel).where(
-                ProcessedDigestModel.digest == digest
-            )
+            select(ProcessedDigestModel).where(ProcessedDigestModel.digest == digest)
         )
         return result.scalar_one_or_none() is not None
 
-    async def mark_processed(
-        self, digest: str, packet_id: UUID
-    ) -> None:
+    async def mark_processed(self, digest: str, packet_id: UUID) -> None:
         """标记 digest 为已处理（事务提交时持久化）。
 
         使用 merge() 实现 INSERT OR REPLACE 语义，
@@ -68,9 +64,7 @@ class IdempotencyGuard:
         )
         await self._session.merge(entry)
 
-    async def is_already_processed(
-        self, packet: AgentPacket
-    ) -> tuple[bool, str]:
+    async def is_already_processed(self, packet: AgentPacket) -> tuple[bool, str]:
         """一站式：计算 digest 并检查是否已处理。
 
         Returns:

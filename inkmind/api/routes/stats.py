@@ -11,7 +11,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from inkmind.api.deps import get_db
 from inkmind.storage.repositories import StatsRepository
-from inkmind.storage.unit_of_work import UnitOfWork
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
 

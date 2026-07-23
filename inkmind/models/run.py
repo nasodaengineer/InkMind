@@ -53,9 +53,7 @@ class Run(BaseModel):
 
     id: UUID = Field(default_factory=uuid4)
     novel_id: UUID
-    chapter_id: UUID | None = Field(
-        default=None, description="kind=plan 时 None"
-    )
+    chapter_id: UUID | None = Field(default=None, description="kind=plan 时 None")
     kind: RunKind
     status: RunStatus = RunStatus.RUNNING
 
@@ -66,25 +64,17 @@ class Run(BaseModel):
     )
 
     # ── 流式中间稿 ──
-    partial_content: str = Field(
-        default="", description="流式中间稿，checkpoint 时写入"
-    )
+    partial_content: str = Field(default="", description="流式中间稿，checkpoint 时写入")
 
     # ── 统计与覆盖 ──
-    llm_stats: dict[str, Any] = Field(
-        default_factory=dict, description="聚合 LLM 调用统计快照"
-    )
+    llm_stats: dict[str, Any] = Field(default_factory=dict, description="聚合 LLM 调用统计快照")
     overwritten_values: dict[str, Any] | None = Field(
         default=None, description="AI 起草被覆盖的旧值（人工编辑时）"
     )
 
     # ── 时间戳 ──
-    started_at: datetime | None = Field(
-        default=None, description="实际开始执行时间"
-    )
-    completed_at: datetime | None = Field(
-        default=None, description="实际完成/终止时间"
-    )
+    started_at: datetime | None = Field(default=None, description="实际开始执行时间")
+    completed_at: datetime | None = Field(default=None, description="实际完成/终止时间")
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 

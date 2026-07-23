@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import shlex
 import subprocess
-import sys
 
 from inkmind.cli.base_command import BaseCommand
 from inkmind.cli.config import CLIConfig
@@ -41,13 +40,17 @@ class ShellCommand(BaseCommand):
         width = min(width, 80)
 
         print()
-        print(chr(0x256d) + chr(0x2500) * (width - 2) + chr(0x256e))
+        print(chr(0x256D) + chr(0x2500) * (width - 2) + chr(0x256E))
         print(chr(0x2502) + ("InkMind v0.1.0 — 交互式写作 Shell".center(width - 2)) + chr(0x2502))
-        print(chr(0x2502) + ("输入 help 查看命令列表，exit 或 Ctrl+C 退出".center(width - 2)) + chr(0x2502))
-        print(chr(0x2570) + chr(0x2500) * (width - 2) + chr(0x256f))
+        print(
+            chr(0x2502)
+            + ("输入 help 查看命令列表，exit 或 Ctrl+C 退出".center(width - 2))
+            + chr(0x2502)
+        )
+        print(chr(0x2570) + chr(0x2500) * (width - 2) + chr(0x256F))
         print()
         if novel_id is None:
-            print(chr(0x2139) + chr(0xfe0f) + " 未指定小说 ID，请先创建或指定一个小说。")
+            print(chr(0x2139) + chr(0xFE0F) + " 未指定小说 ID，请先创建或指定一个小说。")
             print()
 
         prefix = ["python", "-m", "inkmind"]

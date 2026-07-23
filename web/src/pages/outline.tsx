@@ -1,9 +1,16 @@
-/* 三级书脊树 · 大纲规划视图 */
+/* 三级书脊树 · 大纲规划视图（Issue #42 AI 大纲规划） */
 
-import React, { useCallback, useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useParams } from "react-router";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { api, OutlineSpine, VolumeItem, ChapterOutlineItem } from "../lib/api";
+import {
+  api,
+  OutlineSpine,
+  VolumeItem,
+  ChapterOutlineItem,
+  RunItem,
+  connectRunStream,
+} from "../lib/api";
 
 // ── 类型 ──
 
@@ -13,6 +20,22 @@ interface Toast {
   id: number;
   message: string;
   kind: ToastKind;
+}
+
+interface ConfirmDialogState {
+  open: boolean;
+  title: string;
+  message: string;
+  onConfirm: () => void;
+  onCancel?: () => void;
+}
+
+interface RunPanelState {
+  visible: boolean;
+  runId: string | null;
+  phase: string;
+  status: string;
+  error: string | null;
 }
 
 // ── Toast Hook ──
@@ -29,6 +52,22 @@ export default function OutlinePage() {
   const [editingSpine, setEditingSpine] = useState(false);
   const [draftSpine, setDraftSpine] = useState<OutlineSpine | null>(null);
 
+  // Issue #42: AI 规划状态
+  const [confirmDialog, setConfirmDialog] = useState<ConfirmDialogState>({
+    open: false,
+    title: "",
+    message: "",
+    onConfirm: () => {},
+  });
+  const [runPanel, setRunPanel] = useState<RunPanelState>({
+    visible: false,
+    runId: null,
+    phase: "",
+    status: "",
+    error: null,
+  });
+  const abortRef = useRef<(() => void) | null>(null);
+
   const toast = useCallback((message: string, kind: ToastKind = "info") => {
     const id = ++toastId;
     setToasts((prev) => [...prev, { id, message, kind }]);
@@ -36,6 +75,104 @@ export default function OutlinePage() {
       setToasts((prev) => prev.filter((t) => t.id !== id));
     }, 3000);
   }, []);
+
+  // ── AI 规划辅助函数 (Issue #42) ──
+
+  /** 启动 AI 规划 run，连接到 SSE 流 */
+  const startAI = useCallback(
+    async (
+      plannerCall: Promise<RunItem>,
+      _label: string,
+    ) => {
+      try {
+        const run = await plannerCall;
+        setRunPanel({
+          visible: true,
+          runId: run.id,
+          phase: "starting",
+          status: "running",
+          error: null,
+        });
+
+        const abort = connectRunStream(novelId!, run.id, {
+          onPhase: (phase) => {
+            setRunPanel((prev) => ({ ...prev, phase }));
+          },
+          onResult: (result: any) => {
+            if (result?.level === "spine") {
+              // 总纲生成完毕，刷新 spine
+              queryClient.invalidateQueries({ queryKey: ["spine", novelId] });
+              toast("总纲起草完成");
+            } else if (result?.level === "split_volumes") {
+              queryClient.invalidateQueries({ queryKey: ["volumes", novelId] });
+              toast(`拆卷完成，共 ${result.data?.count} 卷`);
+            } else if (result?.level === "volume") {
+              queryClient.invalidateQueries({ queryKey: ["volumes", novelId] });
+              toast("卷纲已更新");
+            } else if (result?.level === "plan_chapters") {
+              queryClient.invalidateQueries({ queryKey: ["volumes", novelId] });
+              toast(`排章完成，共 ${result.data?.count} 章`);
+            }
+          },
+          onDone: (status) => {
+            setRunPanel((prev) => ({
+              ...prev,
+              status,
+              phase: status === "completed" ? "complete" : prev.phase,
+            }));
+            // 刷新数据
+            queryClient.invalidateQueries({ queryKey: ["spine", novelId] });
+            queryClient.invalidateQueries({ queryKey: ["volumes", novelId] });
+            // 3 秒后隐藏面板
+            setTimeout(() => {
+              setRunPanel((prev) => ({ ...prev, visible: false }));
+            }, 3000);
+          },
+          onError: (message) => {
+            setRunPanel((prev) => ({
+              ...prev,
+              status: "failed",
+              error: message,
+            }));
+            toast(`AI 规划失败: ${message}`, "error");
+          },
+        });
+        abortRef.current = abort;
+      } catch (err: any) {
+        // 处理 confirm_overwrite 等 400 错误
+        const msg = String(err?.message || err);
+        if (msg.includes("confirm_overwrite")) {
+          toast("需确认覆盖已存在内容", "error");
+        } else if (msg.includes("spine_required")) {
+          toast("请先起草总纲", "error");
+        } else if (msg.includes("zero_volume_409")) {
+          toast("已有卷存在，无法批量拆卷", "error");
+        } else {
+          toast(`启动失败: ${msg}`, "error");
+        }
+      }
+    },
+    [novelId, queryClient, toast],
+  );
+
+  /** 取消当前 AI 规划 run */
+  const cancelAI = useCallback(async () => {
+    if (abortRef.current) {
+      abortRef.current();
+      abortRef.current = null;
+    }
+    if (runPanel.runId) {
+      try {
+        await api.runs.cancel(novelId!, runPanel.runId);
+      } catch {
+        // 忽略取消失败
+      }
+    }
+    setRunPanel((prev) => ({
+      ...prev,
+      visible: false,
+    }));
+  }, [novelId, runPanel.runId]);
 
   // ── 查询 ──
 
@@ -99,16 +236,8 @@ export default function OutlinePage() {
 
   // ── 计算卷的派生区间 ──
 
-  function getVolumeRange(v: VolumeItem, all: VolumeItem[]): string {
-    // 基于卷序号累加之前的 planned_size
-    let start = 1;
-    for (const prev of all) {
-      if (prev.volume_index < v.volume_index) {
-        start += prev.planned_size;
-      }
-    }
-    const end = start + v.planned_size - 1;
-    return `${start}–${end} 章`;
+  function getVolumeRange(v: VolumeItem, _all: VolumeItem[]): string {
+    return `${v.start_index}–${v.end_index} 章`;
   }
 
   if (!novelId) {
@@ -153,7 +282,37 @@ export default function OutlinePage() {
                       </button>
                       <button
                         className="text-xs px-3 py-1 border border-gray-400 rounded hover:bg-gray-100 text-gray-500"
-                        onClick={() => toast("✦ AI 起草（功能预留）")}
+                        onClick={() => {
+                          const hasContent = draftSpine && (
+                            draftSpine.main_line ||
+                            draftSpine.core_conflict ||
+                            draftSpine.ending ||
+                            draftSpine.selling_points ||
+                            draftSpine.world_background ||
+                            draftSpine.golden_finger
+                          );
+                          if (hasContent) {
+                            setConfirmDialog({
+                              open: true,
+                              title: "确认覆盖总纲",
+                              message: "总纲已有内容，AI 起草将覆盖现有内容。确认继续？",
+                              onConfirm: () => {
+                                setConfirmDialog((prev) => ({ ...prev, open: false }));
+                                startAI(
+                                  api.planner.draftSpine(novelId!, {
+                                    confirm_overwrite: true,
+                                  }),
+                                  "起草总纲",
+                                );
+                              },
+                            });
+                          } else {
+                            startAI(
+                              api.planner.draftSpine(novelId!),
+                              "起草总纲",
+                            );
+                          }
+                        }}
                       >
                         ✦ AI 起草
                       </button>
@@ -250,18 +409,44 @@ export default function OutlinePage() {
               }}
               rangeLabel={getVolumeRange(vol, volumes)}
               toast={toast}
+              startAI={startAI}
+              setConfirmDialog={setConfirmDialog}
             />
           ))}
 
-          {/* ═══ 添加卷 ═══ */}
-          {!showCreateVolume ? (
+          {/* ═══ AI 拆卷 + 添加卷 ═══ */}
+          <div className="flex gap-2">
             <button
-              className="w-full py-3 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-400 hover:text-gray-600 hover:border-gray-400 transition-colors"
+              className="flex-1 py-3 border-2 border-dashed border-gray-300 rounded-lg text-sm text-indigo-400 hover:text-indigo-600 hover:border-indigo-300 transition-colors"
+              onClick={() => {
+                if (volumes.length > 0) {
+                  toast("已有卷存在，拆卷仅支持零卷冷启动", "error");
+                  return;
+                }
+                setConfirmDialog({
+                  open: true,
+                  title: "AI 全书拆卷",
+                  message: `AI 将根据总纲将全书拆分为卷。当前零卷，确认开始拆卷？`,
+                  onConfirm: () => {
+                    setConfirmDialog((prev) => ({ ...prev, open: false }));
+                    startAI(
+                      api.planner.splitVolumes(novelId!, 5),
+                      "全书拆卷",
+                    );
+                  },
+                });
+              }}
+            >
+              ✦ AI 拆卷（2-20卷）
+            </button>
+            <button
+              className="flex-1 py-3 border-2 border-dashed border-gray-300 rounded-lg text-sm text-gray-400 hover:text-gray-600 hover:border-gray-400 transition-colors"
               onClick={() => setShowCreateVolume(true)}
             >
               ＋ 添加卷
             </button>
-          ) : (
+          </div>
+          {showCreateVolume && (
             <div className="border-2 border-dashed border-gray-300 rounded-lg p-4 bg-gray-50">
               <div className="flex items-center gap-3">
                 <input
@@ -301,6 +486,43 @@ export default function OutlinePage() {
           )}
         </div>
       </div>
+
+      {/* ═══ Run 面板 (Issue #42) ═══ */}
+      {runPanel.visible && (
+        <RunPanel
+          phase={runPanel.phase}
+          status={runPanel.status}
+          error={runPanel.error}
+          onCancel={cancelAI}
+        />
+      )}
+
+      {/* ═══ 确认弹窗 (Issue #42) ═══ */}
+      {confirmDialog.open && (
+        <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-[60]">
+          <div className="bg-white rounded-xl shadow-2xl p-6 max-w-sm w-full mx-4">
+            <h3 className="text-sm font-semibold mb-2">{confirmDialog.title}</h3>
+            <p className="text-sm text-gray-600 mb-4">{confirmDialog.message}</p>
+            <div className="flex gap-2 justify-end">
+              <button
+                className="px-3 py-1.5 border border-gray-300 text-sm rounded hover:bg-gray-100"
+                onClick={() => {
+                  confirmDialog.onCancel?.();
+                  setConfirmDialog((prev) => ({ ...prev, open: false }));
+                }}
+              >
+                取消
+              </button>
+              <button
+                className="px-3 py-1.5 bg-red-600 text-white text-sm rounded hover:bg-red-500"
+                onClick={confirmDialog.onConfirm}
+              >
+                确认覆盖
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Toast 容器 */}
       <div className="fixed left-4 bottom-4 flex flex-col gap-2 z-50 max-w-xs">
@@ -368,6 +590,8 @@ function VolumeNode({
   onToggle,
   rangeLabel,
   toast,
+  startAI,
+  setConfirmDialog,
 }: {
   volume: VolumeItem;
   novelId: string;
@@ -375,6 +599,8 @@ function VolumeNode({
   onToggle: () => void;
   rangeLabel: string;
   toast: (msg: string, kind?: ToastKind) => void;
+  startAI: (call: Promise<RunItem>, label: string) => Promise<void>;
+  setConfirmDialog: React.Dispatch<React.SetStateAction<ConfirmDialogState>>;
 }) {
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
@@ -441,7 +667,7 @@ function VolumeNode({
     }: {
       idx: number;
       data: Partial<ChapterOutlineItem>;
-    }) => api.chapters.patch(novelId, idx, data),
+    }) => api.chapters.patchOutline(novelId, idx, data),
     onSuccess: () => {
       queryClient.invalidateQueries({
         queryKey: ["volume-spines", novelId, volume.volume_index],
@@ -533,7 +759,30 @@ function VolumeNode({
           className="text-xs px-2 py-1 border border-gray-300 rounded hover:bg-gray-100 text-gray-500"
           onClick={(e) => {
             e.stopPropagation();
-            toast("✦ AI 起草（功能预留）");
+            // AI 起草卷纲
+            const hasContent = volume.stage_goal || volume.main_line ||
+              volume.side_line || volume.volume_cliffhanger;
+            if (hasContent) {
+              setConfirmDialog({
+                open: true,
+                title: "确认覆盖卷纲",
+                message: `「${volume.title}」已有内容，确认覆盖吗？`,
+                onConfirm: () => {
+                  setConfirmDialog((prev) => ({ ...prev, open: false }));
+                  startAI(
+                    api.planner.draftVolume(novelId, volume.id, {
+                      confirm_overwrite: true,
+                    }),
+                    "填补卷纲",
+                  );
+                },
+              });
+            } else {
+              startAI(
+                api.planner.draftVolume(novelId, volume.id),
+                "填补卷纲",
+              );
+            }
           }}
         >
           ✦ AI 起草
@@ -611,8 +860,11 @@ function VolumeNode({
               <button
                 className="px-3 py-1 bg-gray-800 text-white text-xs rounded hover:bg-gray-700"
                 onClick={() => {
-                  toast("批量规划（功能预留）");
                   setShowPlan(false);
+                  startAI(
+                    api.planner.planChapters(novelId, volume.id, planCount),
+                    `批量排章 (${planCount} 章)`,
+                  );
                 }}
               >
                 开始规划
@@ -752,6 +1004,11 @@ function ChapterRow({
       {rhythmBadge && (
         <span className={`text-xs font-bold ${rhythmClass}`}>{rhythmBadge}</span>
       )}
+      {(chapter.foreshadowing_count ?? 0) > 0 && (
+        <span className="text-xs px-1 py-0.5 rounded bg-purple-100 text-purple-600 font-medium" title="待回收伏笔">
+          伏{chapter.foreshadowing_count}
+        </span>
+      )}
       <span className="flex-1 truncate">{chapter.title}</span>
       <span className="text-xs text-gray-400 truncate max-w-40 hidden sm:block">
         {chapter.summary}
@@ -787,6 +1044,82 @@ function EditField({
         value={value}
         onChange={(e) => onChange(e.target.value)}
       />
+    </div>
+  );
+}
+
+// ── RunPanel 组件 (Issue #42) ──
+
+function RunPanel({
+  phase,
+  status,
+  error,
+  onCancel,
+}: {
+  phase: string;
+  status: string;
+  error: string | null;
+  onCancel: () => void;
+}) {
+  const phaseLabel: Record<string, string> = {
+    starting: "准备中...",
+    planning: "AI 规划中...",
+    writing: "写作中...",
+    reviewing: "评审中...",
+    revising: "修订中...",
+    complete: "完成",
+  };
+
+  const isRunning = status === "running";
+  const isDone = status === "completed" || status === "cancelled" || status === "failed";
+
+  return (
+    <div className="fixed right-4 top-20 z-50 w-72 bg-white rounded-xl shadow-2xl border border-gray-200 overflow-hidden">
+      <div className="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+        <span className="text-xs font-semibold text-gray-600 uppercase tracking-wider">
+          AI 规划进度
+        </span>
+        {isRunning && (
+          <button
+            className="text-xs px-2 py-1 border border-red-400 text-red-500 rounded hover:bg-red-50"
+            onClick={onCancel}
+          >
+            取消
+          </button>
+        )}
+      </div>
+      <div className="px-4 py-3 space-y-2">
+        {/* 阶段指示 */}
+        <div className="flex items-center gap-2">
+          {isRunning ? (
+            <span className="w-2 h-2 bg-amber-500 rounded-full animate-pulse" />
+          ) : isDone ? (
+            <span className="w-2 h-2 bg-green-500 rounded-full" />
+          ) : (
+            <span className="w-2 h-2 bg-gray-300 rounded-full" />
+          )}
+          <span className="text-sm text-gray-700">
+            {phaseLabel[phase] || phase}
+          </span>
+        </div>
+
+        {/* 进度条 */}
+        {isRunning && (
+          <div className="w-full bg-gray-100 rounded-full h-1.5">
+            <div
+              className="bg-amber-500 h-1.5 rounded-full animate-pulse"
+              style={{ width: phase === "planning" ? "40%" : phase === "writing" ? "60%" : "80%" }}
+            />
+          </div>
+        )}
+
+        {/* 错误信息 */}
+        {error && (
+          <div className="text-xs text-red-600 bg-red-50 rounded px-2 py-1">
+            {error}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

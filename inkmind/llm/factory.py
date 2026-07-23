@@ -9,15 +9,12 @@ from inkmind.llm.providers import PROVIDER_REGISTRY
 from inkmind.models.llm import (
     AgentModelBinding,
     LLMConfig,
-    ProviderConfig,
-    ProviderProtocol,
-    RetryConfig,
 )
 
 
 class ProviderFactory:
     """Provider 实例工厂。
-    
+
     职责：
       - 根据 LLMConfig 创建所有 Provider 实例
       - 按名称 / 协议查找 Provider
@@ -44,7 +41,9 @@ class ProviderFactory:
         """按名称获取 Provider 实例。"""
         provider = self._providers.get(name)
         if provider is None:
-            raise KeyError(f"Provider '{name}' not found. Available: {list(self._providers.keys())}")
+            raise KeyError(
+                f"Provider '{name}' not found. Available: {list(self._providers.keys())}"
+            )
         return provider
 
     def get_providers_by_model(self, model: str) -> List[BaseProvider]:
@@ -120,9 +119,7 @@ class ModelRouter:
         stream: bool = False,
     ) -> RuntimeError:
         """组装「所有模型失败」错误（含每个候选的异常信息）。"""
-        error_details = "; ".join(
-            f"[{m}@{p}]: {err}" for m, p, err in errors
-        )
+        error_details = "; ".join(f"[{m}@{p}]: {err}" for m, p, err in errors)
         suffix = " (stream)" if stream else ""
         return RuntimeError(
             f"All models failed for agent '{agent_role}'{suffix}. "
@@ -150,8 +147,12 @@ class ModelRouter:
             provider = self.get_provider_for_model(model)
             try:
                 return await provider.chat(
-                    prompt, model=model, system_prompt=system_prompt,
-                    degraded=idx > 0, agent_name=agent_role, **kwargs,
+                    prompt,
+                    model=model,
+                    system_prompt=system_prompt,
+                    degraded=idx > 0,
+                    agent_name=agent_role,
+                    **kwargs,
                 )
             except Exception as e:
                 provider.stats.fallback_used += 1
@@ -176,8 +177,12 @@ class ModelRouter:
             provider = self.get_provider_for_model(model)
             try:
                 async for chunk in provider.chat_stream(
-                    prompt, model=model, system_prompt=system_prompt,
-                    degraded=idx > 0, agent_name=agent_role, **kwargs,
+                    prompt,
+                    model=model,
+                    system_prompt=system_prompt,
+                    degraded=idx > 0,
+                    agent_name=agent_role,
+                    **kwargs,
                 ):
                     yield chunk
                 return

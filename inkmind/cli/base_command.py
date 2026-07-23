@@ -10,7 +10,7 @@ from inkmind.cli.formatter import OutputFormatter
 
 class BaseCommand:
     """所有 CLI 命令的基类。
-    
+
     子类只需实现 `_run()` 方法。
     基类自动处理 OutputFormatter 初始化、CLIConfig 加载、
     db_path 解析、novel_id 提取。
@@ -22,7 +22,7 @@ class BaseCommand:
         formatter = OutputFormatter(json_mode=getattr(args, "json", False))
         cfg = CLIConfig.load(json_output=formatter.json_mode)
         db_path = getattr(args, "db", None) or cfg.db_path
-        
+
         novel_id: UUID | None = None
         raw_nid = getattr(args, "novel_id", None) or cfg.novel_id
         if raw_nid:
@@ -30,13 +30,13 @@ class BaseCommand:
                 novel_id = raw_nid
             else:
                 novel_id = UUID(raw_nid)
-        
+
         result = cls._run(args, formatter, cfg, db_path, novel_id)
         if hasattr(result, "__await__"):
             import asyncio
-            return asyncio.run(result)
-        return result
-    
+
+            asyncio.run(result)
+
     @classmethod
     def _run(cls, args, formatter, cfg, db_path, novel_id):
         """子类实现具体逻辑。"""

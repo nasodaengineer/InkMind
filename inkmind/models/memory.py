@@ -160,9 +160,7 @@ class ForeshadowingMarker(BaseModel):
     marker_id: UUID = Field(default_factory=uuid4)
     description: str = Field(..., description="伏笔描述")
     planted_chapter: int = Field(ge=1, description="埋下伏笔的章节")
-    expected_payoff_chapter: int | None = Field(
-        None, description="预期的回收章节（如有）"
-    )
+    expected_payoff_chapter: int | None = Field(None, description="预期的回收章节（如有）")
     is_resolved: bool = False
     """是否已回收"""
 
@@ -188,9 +186,7 @@ class SlidingWindowState(BaseModel):
     current_chapter_index: int = Field(ge=1)
     """当前正在写的章节序号"""
 
-    recent_chapters: list[int] = Field(
-        default_factory=list, description="滑窗内包含的章节序号列表"
-    )
+    recent_chapters: list[int] = Field(default_factory=list, description="滑窗内包含的章节序号列表")
 
     # ── 状态卡 ──
     character_states: dict[UUID, CharacterStateCard] = Field(
@@ -214,9 +210,7 @@ class ActiveContext(BaseModel):
     current_chapter_index: int
     sliding_window: SlidingWindowState
 
-    recent_chapter_titles: list[str] = Field(
-        default_factory=list, description="滑窗内各章标题"
-    )
+    recent_chapter_titles: list[str] = Field(default_factory=list, description="滑窗内各章标题")
 
     state_cards: list[CharacterStateCard] = Field(
         default_factory=list, description="当前需要追踪的所有角色状态卡"
@@ -243,12 +237,8 @@ class CompressedEvent(BaseModel):
 
     chapter_index: int = Field(ge=1, description="事件发生的章节序号")
     chapter_title: str = Field(..., description="章节标题")
-    event_description: str = Field(
-        ..., description="事件描述（一句话，保持叙事性）"
-    )
-    involved_characters: list[UUID] = Field(
-        default_factory=list, description="涉及的角色 ID"
-    )
+    event_description: str = Field(..., description="事件描述（一句话，保持叙事性）")
+    involved_characters: list[UUID] = Field(default_factory=list, description="涉及的角色 ID")
     location: str | None = Field(None, description="事件发生地点")
     is_milestone: bool = False
     """是否为情节里程碑事件"""
@@ -271,14 +261,10 @@ class CompressedMemory(BaseModel):
     """压缩元数据"""
 
     # ── 内容 ──
-    summary: str = Field(
-        ..., description="一段总摘要。叙事性浓缩，保持可读性。约 200-500 字。"
-    )
+    summary: str = Field(..., description="一段总摘要。叙事性浓缩，保持可读性。约 200-500 字。")
     """一段总摘要：叙事性浓缩，保持可读性"""
 
-    events: list[CompressedEvent] = Field(
-        ..., description="结构化事件清单，按章节顺序排列"
-    )
+    events: list[CompressedEvent] = Field(..., description="结构化事件清单，按章节顺序排列")
     """结构化事件清单，按章节顺序排列"""
 
     # ── 衍生信息 ──
@@ -287,13 +273,9 @@ class CompressedMemory(BaseModel):
         description="本章节范围内所有出场角色 ID 集合",
     )
 
-    key_locations: list[str] = Field(
-        default_factory=list, description="本章节范围内出现的地点"
-    )
+    key_locations: list[str] = Field(default_factory=list, description="本章节范围内出现的地点")
 
-    new_foreshadowing: list[str] = Field(
-        default_factory=list, description="本区间新埋下的伏笔描述"
-    )
+    new_foreshadowing: list[str] = Field(default_factory=list, description="本区间新埋下的伏笔描述")
 
     resolved_foreshadowing: list[str] = Field(
         default_factory=list, description="本区间已回收的伏笔描述"
@@ -301,9 +283,7 @@ class CompressedMemory(BaseModel):
 
     # ── 元信息 ──
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
-    llm_model: str | None = Field(
-        default=None, description="用于压缩的 LLM 模型标识"
-    )
+    llm_model: str | None = Field(default=None, description="用于压缩的 LLM 模型标识")
 
 
 class L2Archive(BaseModel):
@@ -383,9 +363,7 @@ class CompressionTask(BaseModel):
     status: CompressionTaskStatus = CompressionTaskStatus.PENDING
     started_at: datetime | None = None
     completed_at: datetime | None = None
-    error_message: str | None = Field(
-        default=None, description="失败时的错误信息"
-    )
+    error_message: str | None = Field(default=None, description="失败时的错误信息")
 
 
 class CompressionResult(BaseModel):
@@ -401,9 +379,7 @@ class CompressionResult(BaseModel):
 class CompressStrategy(BaseModel):
     """压缩策略配置。控制何时以及如何触发 L2 压缩。"""
 
-    default_granularity: int = Field(
-        default=10, ge=5, le=100, description="默认每 N 章压缩一次"
-    )
+    default_granularity: int = Field(default=10, ge=5, le=100, description="默认每 N 章压缩一次")
     """默认每 N 章压缩一次"""
 
     enable_dynamic_granularity: bool = True

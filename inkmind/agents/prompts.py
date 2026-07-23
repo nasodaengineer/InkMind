@@ -134,11 +134,6 @@ def build_editor_prompt(ctx: ChapterContext, content: str, iteration: int) -> st
     )
 
 
-def build_memory_prompt(
-    chapter_index: int, chapter_title: str, content: str
-) -> str:
+def build_memory_prompt(chapter_index: int, chapter_title: str, content: str) -> str:
     """MemoryKeeper 摘要 prompt：定稿章节全文。"""
-    return (
-        f"请为第 {chapter_index} 章「{chapter_title}」生成结构化记忆。\n\n"
-        f"章节全文：\n{content}"
-    )
+    return f"请为第 {chapter_index} 章「{chapter_title}」生成结构化记忆。\n\n章节全文：\n{content}"

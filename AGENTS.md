@@ -254,3 +254,9 @@ Single-context — `CONTEXT.md` + `docs/adr/` at repo root. See `docs/agents/dom
 ### llm
 
 测试用的大模型：`docs\ds.md`
+
+---
+
+## Agent 交互偏好
+
+- **语言**：始终使用中文回复用户。

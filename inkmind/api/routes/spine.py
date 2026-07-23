@@ -8,7 +8,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from inkmind.api.dependencies import get_uow
 from inkmind.models.novel import OutlineSpine
@@ -22,6 +22,7 @@ router = APIRouter(
 
 class SpineUpdate(BaseModel):
     """总纲更新请求。"""
+
     main_line: str | None = None
     core_conflict: str | None = None
     ending: str | None = None
@@ -32,6 +33,7 @@ class SpineUpdate(BaseModel):
 
 class SpineResponse(BaseModel):
     """总纲响应。"""
+
     novel_id: str
     main_line: str = ""
     core_conflict: str = ""
@@ -63,6 +65,7 @@ async def get_spine(
     uow: UnitOfWork = Depends(get_uow),
 ) -> SpineResponse:
     """获取总纲（懒创建：如果不存在则自动创建空总纲）。"""
+
     spine = await uow.spines.get_by_novel(novel_id)
     if spine is None:
         spine = OutlineSpine(novel_id=novel_id)
@@ -78,6 +81,7 @@ async def update_spine(
     uow: UnitOfWork = Depends(get_uow),
 ) -> SpineResponse:
     """更新总纲字段。"""
+
     spine = await uow.spines.get_by_novel(novel_id)
     if spine is None:
         spine = OutlineSpine(novel_id=novel_id)

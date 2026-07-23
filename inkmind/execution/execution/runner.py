@@ -5,17 +5,15 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import time
 from datetime import datetime, timezone
-from typing import Any, AsyncGenerator, Callable, Optional
+from typing import Any, Callable
 from uuid import UUID
 
-from inkmind.llm.client import LLMClient, build_llm_client
-from inkmind.models.agent import ChapterStatus, ChapterOutline, Verdict
+from inkmind.llm.client import LLMClient
+from inkmind.models.agent import ChapterOutline, Verdict
 from inkmind.models.chapter import Chapter
-from inkmind.models.llm import LLMConfig
 from inkmind.models.run import RunKind, RunStatus
 from inkmind.storage.unit_of_work import UnitOfWork
 
@@ -82,6 +80,8 @@ class RunLoop:
         if self._check_cancelled():
             return
 
+        assert self._uow.runs is not None
+
         # 获取 Run 记录
         run = await self._uow.runs.get_by_id(self._run_id)
         if run is None:
@@ -107,9 +107,7 @@ class RunLoop:
 
     # ── Generate ────────────────────────────────────────
 
-    async def _run_generate(
-        self, novel_id: UUID, chapter_id: UUID | None
-    ) -> None:
+    async def _run_generate(self, novel_id: UUID, chapter_id: UUID | None) -> None:
         """Writer → Editor(≤3次修订) → awaiting_human"""
         self._emit_phase("writing")
 
@@ -155,17 +153,13 @@ class RunLoop:
                 return
 
             self._emit_phase("revising")
-            draft_content = await self._stream_revise(
-                novel_id, draft_content
-            )
+            draft_content = await self._stream_revise(novel_id, draft_content)
             if self._cancelled:
                 return
 
     # ── Revise ──────────────────────────────────────────
 
-    async def _run_revise(
-        self, novel_id: UUID, chapter_id: UUID | None
-    ) -> None:
+    async def _run_revise(self, novel_id: UUID, chapter_id: UUID | None) -> None:
         """Writer 修订 → Editor → awaiting_human"""
         if self._chapter is None:
             raise ValueError("revise 需要传入 chapter")
@@ -173,9 +167,7 @@ class RunLoop:
         self._emit_phase("revising")
 
         # 用现有内容作为基线，让 Writer 重写
-        revised = await self._stream_revise(
-            novel_id, self._chapter.content
-        )
+        revised = await self._stream_revise(novel_id, self._chapter.content)
         if self._cancelled:
             return
 
@@ -196,9 +188,7 @@ class RunLoop:
 
     # ── Finalize ────────────────────────────────────────
 
-    async def _run_finalize(
-        self, novel_id: UUID, chapter_id: UUID | None
-    ) -> None:
+    async def _run_finalize(self, novel_id: UUID, chapter_id: UUID | None) -> None:
         """直接落稿（无 AI 生成）。"""
         if self._chapter is None:
             raise ValueError("finalize 需要传入 chapter")
@@ -216,10 +206,7 @@ class RunLoop:
         self._emit_phase("planning")
 
         # Planner 调用
-        plan_prompt = (
-            f"请为小说 {novel_id} 规划接下来的章节。"
-            f"请以 JSON 格式返回章节大纲列表。"
-        )
+        plan_prompt = f"请为小说 {novel_id} 规划接下来的章节。请以 JSON 格式返回章节大纲列表。"
         response = await self._llm.chat("planner", plan_prompt)
         if self._cancelled:
             return
@@ -232,22 +219,14 @@ class RunLoop:
     async def _stream_write(self, novel_id: UUID) -> str:
         """流式调用 Writer，积累完整内容后返回。"""
         prompt = self._build_write_prompt(novel_id)
-        return await self._accumulate_stream(
-            "writer", prompt, "writing"
-        )
+        return await self._accumulate_stream("writer", prompt, "writing")
 
-    async def _stream_revise(
-        self, novel_id: UUID, existing_content: str
-    ) -> str:
+    async def _stream_revise(self, novel_id: UUID, existing_content: str) -> str:
         """流式调用 Writer 修订。"""
         prompt = self._build_revise_prompt(novel_id, existing_content)
-        return await self._accumulate_stream(
-            "writer", prompt, "revising"
-        )
+        return await self._accumulate_stream("writer", prompt, "revising")
 
-    async def _accumulate_stream(
-        self, agent_role: str, prompt: str, phase: str
-    ) -> str:
+    async def _accumulate_stream(self, agent_role: str, prompt: str, phase: str) -> str:
         """从 chat_stream 累积内容，同时做 checkpoint。"""
         chunks: list[str] = []
         async for chunk in self._llm.chat_stream(agent_role, prompt):
@@ -265,8 +244,7 @@ class RunLoop:
             now = time.monotonic()
             if (
                 now - self._last_checkpoint >= self._checkpoint_interval_s
-                or self._content_since_checkpoint
-                >= self._checkpoint_interval_bytes
+                or self._content_since_checkpoint >= self._checkpoint_interval_bytes
             ):
                 await self._do_checkpoint()
                 self._last_checkpoint = now
@@ -278,13 +256,11 @@ class RunLoop:
 
     # ── Editor 评审 ─────────────────────────────────────
 
-    async def _call_editor(
-        self, novel_id: UUID, content: str
-    ) -> Verdict:
+    async def _call_editor(self, novel_id: UUID, content: str) -> Verdict:
         """调用 Editor 评审，返回结论。"""
         review_prompt = (
             f"请评审以下章节内容。"
-            f"以 JSON 格式返回 {{\"verdict\": \"approve\" 或 \"needs_revision\"}}。\n\n"
+            f'以 JSON 格式返回 {{"verdict": "approve" 或 "needs_revision"}}。\n\n'
             f"{content[:3000]}"
         )
         response = await self._llm.chat("editor", review_prompt)
@@ -304,6 +280,8 @@ class RunLoop:
 
     async def _do_checkpoint(self) -> None:
         """将 partial_content 写入数据库。"""
+        assert self._uow.runs is not None
+
         run = await self._uow.runs.get_by_id(self._run_id)
         if run is None:
             return
@@ -312,13 +290,9 @@ class RunLoop:
 
     # ── 终态处理 ────────────────────────────────────────
 
-    async def _finalize_draft(
-        self, novel_id: UUID, content: str
-    ) -> None:
+    async def _finalize_draft(self, novel_id: UUID, content: str) -> None:
         """T9 + T10: 落稿 + 等待人工确认。"""
-        chapter_title = (
-            self._chapter.title if self._chapter else "未命名章节"
-        )
+        chapter_title = self._chapter.title if self._chapter else "未命名章节"
         await self._uow.t9_finalize_draft(
             run_id=self._run_id,
             chapter_content=content,
@@ -381,15 +355,9 @@ class RunLoop:
                 f"本章大纲: {self._outline.summary}\n"
                 f"关键事件: {', '.join(self._outline.key_events)}"
             )
-        return (
-            f"请写作小说章节「{title}」。\n"
-            f"{outline_text}\n\n"
-            f"请开始写作正文。"
-        )
+        return f"请写作小说章节「{title}」。\n{outline_text}\n\n请开始写作正文。"
 
-    def _build_revise_prompt(
-        self, novel_id: UUID, existing_content: str
-    ) -> str:
+    def _build_revise_prompt(self, novel_id: UUID, existing_content: str) -> str:
         return (
             f"请修订以下章节内容。\n"
             f"现有内容:\n{existing_content[:3000]}\n\n"

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from uuid import UUID
+from typing import Any
 
 from sqlalchemy import func, select
 
@@ -35,22 +35,20 @@ class StatusCommand(BaseCommand):
             return
 
         async with get_session(db_path) as session:
-            result = await session.execute(
+            novel_result = await session.execute(
                 select(NovelModel).where(NovelModel.uuid == str(novel_id))
             )
-            novel = result.scalar_one_or_none()
+            novel = novel_result.scalar_one_or_none()
             if novel is None:
                 formatter.error(f"小说 {novel_id} 不存在")
                 return
 
-            result = await session.execute(
-                select(PipelineStateModel).where(
-                    PipelineStateModel.novel_id == str(novel_id)
-                )
+            ps_result = await session.execute(
+                select(PipelineStateModel).where(PipelineStateModel.novel_id == str(novel_id))
             )
-            pipeline = result.scalar_one_or_none()
+            ps_result.scalar_one_or_none()
 
-            result = await session.execute(
+            count_result = await session.execute(
                 select(
                     ChapterModel.status,
                     func.count(ChapterModel.uuid),
@@ -58,19 +56,19 @@ class StatusCommand(BaseCommand):
                 .where(ChapterModel.novel_id == str(novel_id))
                 .group_by(ChapterModel.status)
             )
-            status_counts = dict(result.all())
+            status_counts: dict[str, int] = {row[0]: row[1] for row in count_result.all()}
 
-            result = await session.execute(
+            ch_result = await session.execute(
                 select(ChapterModel)
                 .where(ChapterModel.novel_id == str(novel_id))
                 .order_by(ChapterModel.chapter_index)
             )
-            chapters = list(result.scalars().all())
+            chapters = list(ch_result.scalars().all())
 
             total = len(chapters)
             finalized = status_counts.get("finalized", 0)
 
-        data = {
+        data: dict[str, Any] = {
             "novel_id": str(novel_id),
             "title": novel.title,
             "description": novel.description,
@@ -100,28 +98,45 @@ class StatusCommand(BaseCommand):
             text_fn=lambda d: _format_text(d, args.verbose, chapters),
         )
 
+
 def _format_text(data: dict, verbose: bool, chapters: list) -> str:
     lines = []
-    lines.append(f'📖 {data["title"]}')
+    lines.append(f"📖 {data['title']}")
     if data["description"]:
-        lines.append(f'   {data["description"]}')
-    lines.append(f'  ├ 状态: {data["status"]}')
-    lines.append(f'  ├ 章节: {data["chapters"]["total"]} 总 / {data["chapters"]["finalized"]} 定稿')
+        lines.append(f"   {data['description']}")
+    lines.append(f"  ├ 状态: {data['status']}")
+    lines.append(f"  ├ 章节: {data['chapters']['total']} 总 / {data['chapters']['finalized']} 定稿")
     if data["chapters"]["by_status"]:
         status_parts = []
         for s, c in sorted(data["chapters"]["by_status"].items()):
-            emoji = {"planned": "📋", "writing": "✍️", "draft_ready": "📄", "reviewing": "🔍", "approved": "✅", "finalized": "⭐", "revising": "🔄"}.get(s, "❓")
-            status_parts.append(f'{emoji} {s}: {c}')
-        sp = ' | '.join(status_parts)
-        lines.append(f'  └ 状态分布: {sp}')
+            emoji = {
+                "planned": "📋",
+                "writing": "✍️",
+                "draft_ready": "📄",
+                "reviewing": "🔍",
+                "approved": "✅",
+                "finalized": "⭐",
+                "revising": "🔄",
+            }.get(s, "❓")
+            status_parts.append(f"{emoji} {s}: {c}")
+        sp = " | ".join(status_parts)
+        lines.append(f"  └ 状态分布: {sp}")
     if verbose and chapters:
         lines.append("")
-        lines.append('📑 章节列表:')
+        lines.append("📑 章节列表:")
         for c in chapters:
-            emoji = {"planned": "📋", "writing": "✍️", "draft_ready": "📄", "reviewing": "🔍", "approved": "✅", "finalized": "⭐", "revising": "🔄"}.get(c.status, "❓")
+            emoji = {
+                "planned": "📋",
+                "writing": "✍️",
+                "draft_ready": "📄",
+                "reviewing": "🔍",
+                "approved": "✅",
+                "finalized": "⭐",
+                "revising": "🔄",
+            }.get(c.status, "❓")
             marker = "★" if c.is_baseline else " "
-            wc = f'（{len(c.content)} 字）' if c.content else ""
-            lines.append(f'  {c.chapter_index:>3}. {emoji} {c.title} [{c.status}] {marker} {wc}')
+            wc = f"（{len(c.content)} 字）" if c.content else ""
+            lines.append(f"  {c.chapter_index:>3}. {emoji} {c.title} [{c.status}] {marker} {wc}")
     return "\n".join(lines)
 
 

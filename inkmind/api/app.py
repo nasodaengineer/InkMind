@@ -10,7 +10,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from inkmind.api.routes import health, novels, chapters, volumes, spine, runs, materials, settings, stats
+from inkmind.api.routes import (
+    health,
+    novels,
+    chapters,
+    volumes,
+    spine,
+    runs,
+    materials,
+    settings,
+    stats,
+)
 
 
 @asynccontextmanager
@@ -75,7 +85,10 @@ def create_app(db_path: str | None = None) -> FastAPI:
         async def spa_fallback(full_path: str):
             if full_path.startswith("api/"):
                 from fastapi.responses import JSONResponse
-                return JSONResponse({"error": {"code": 404, "message": "not found"}}, status_code=404)
+
+                return JSONResponse(
+                    {"error": {"code": 404, "message": "not found"}}, status_code=404
+                )
             return HTMLResponse(index_html)
     else:
         # 无 dist 时 /api 以外的路径返回 404 提示
