@@ -121,8 +121,12 @@ class TestScriptedLLMClient:
 
     async def test_custom_responses_consumed_in_order(self):
         llm = ScriptedLLMClient(
-            responses={"editor": ['{"verdict": "needs_revision", "issues": ["节奏慢"]}',
-                                  '{"verdict": "approve", "issues": []}']}
+            responses={
+                "editor": [
+                    '{"verdict": "needs_revision", "issues": ["节奏慢"]}',
+                    '{"verdict": "approve", "issues": []}',
+                ]
+            }
         )
         r1 = await llm.chat("editor", "评审1")
         r2 = await llm.chat("editor", "评审2")
@@ -164,10 +168,10 @@ class TestWriterAgent:
             )
         )
         prompt = llm.calls[0]["prompt"]
-        assert "星辰之海" in prompt          # 小说标题
-        assert "星陨" in prompt              # 本章标题
+        assert "星辰之海" in prompt  # 小说标题
+        assert "星陨" in prompt  # 本章标题
         assert "第 3 章" in prompt or "第3章" in prompt
-        assert "第一章：主角启程" in prompt   # 前文摘要
+        assert "第一章：主角启程" in prompt  # 前文摘要
         assert "遭遇星兽" in prompt
 
     async def test_revise_prompt_contains_issues_and_previous(self):
@@ -273,9 +277,7 @@ class TestPlannerAgent:
 
 class TestEditorAgent:
     async def test_approve_plain_json(self):
-        llm = ScriptedLLMClient(
-            responses={"editor": ['{"verdict": "approve", "issues": []}']}
-        )
+        llm = ScriptedLLMClient(responses={"editor": ['{"verdict": "approve", "issues": []}']})
         agent = EditorAgent(llm)
         verdict = await agent.review(_ctx(), content="正文", iteration=0)
         assert verdict.verdict == Verdict.APPROVE
@@ -370,10 +372,7 @@ def _approve_llm(writer_content: str, memory_json: str | None = None) -> Scripte
         responses={
             "writer": [writer_content],
             "editor": ['{"verdict": "approve", "issues": []}'],
-            "memory-keeper": [
-                memory_json
-                or '{"summary": "主角踏上旅程", "key_events": ["启程"]}'
-            ],
+            "memory-keeper": [memory_json or '{"summary": "主角踏上旅程", "key_events": ["启程"]}'],
         }
     )
 
@@ -491,9 +490,7 @@ class TestPipelineOneRound:
 
 
 class TestPipelinePlanner:
-    async def test_first_round_plans_and_persists_outlines(
-        self, uow: UnitOfWork, novel_id: UUID
-    ):
+    async def test_first_round_plans_and_persists_outlines(self, uow: UnitOfWork, novel_id: UUID):
         """第 1 轮：无大纲 → Planner 规划多章 → T2 持久化 PLANNED 占位章节。"""
         await _seed_novel(uow, novel_id)
         llm = _approve_llm("正文。" * 100)
@@ -512,9 +509,7 @@ class TestPipelinePlanner:
             assert planned.summary  # 大纲文本存于 summary
             assert planned.content == ""  # 占位章节无正文
 
-    async def test_writer_prompt_contains_planner_outline(
-        self, uow: UnitOfWork, novel_id: UUID
-    ):
+    async def test_writer_prompt_contains_planner_outline(self, uow: UnitOfWork, novel_id: UUID):
         """Writer 根据 Planner 大纲写作（scripted 大纲含可识别标记）。"""
         await _seed_novel(uow, novel_id)
         llm = _approve_llm("正文。" * 100)
@@ -524,9 +519,7 @@ class TestPipelinePlanner:
         writer_calls = [c for c in llm.calls if c["agent_role"] == "writer"]
         assert "第1章大纲内容" in writer_calls[0]["prompt"]
 
-    async def test_second_round_reuses_stored_outline(
-        self, uow: UnitOfWork, novel_id: UUID
-    ):
+    async def test_second_round_reuses_stored_outline(self, uow: UnitOfWork, novel_id: UUID):
         """第 2 轮：第 2 章已有 PLANNED 大纲 → 不再调用 Planner，直接复用。"""
         await _seed_novel(uow, novel_id)
         llm = _approve_llm("正文。" * 100)
@@ -544,9 +537,7 @@ class TestPipelinePlanner:
         assert "第2章大纲内容" in r2_prompt
         assert "第3章大纲内容" not in r2_prompt
 
-    async def test_finalized_chapter_reuses_planned_row(
-        self, uow: UnitOfWork, novel_id: UUID
-    ):
+    async def test_finalized_chapter_reuses_planned_row(self, uow: UnitOfWork, novel_id: UUID):
         """定稿复用 PLANNED 行（同 id 更新，不新增行触发唯一约束冲突）。"""
         await _seed_novel(uow, novel_id)
         llm = _approve_llm("正文。" * 100)
@@ -561,9 +552,7 @@ class TestPipelinePlanner:
             assert ch2s[0].status == ChapterStatus.FINALIZED
             assert ch2s[0].id == r2.chapter_id
 
-    async def test_planner_failure_does_not_block(
-        self, uow: UnitOfWork, novel_id: UUID
-    ):
+    async def test_planner_failure_does_not_block(self, uow: UnitOfWork, novel_id: UUID):
         """Planner 解析失败 → 无大纲兜底，流水线继续定稿。"""
         await _seed_novel(uow, novel_id)
         llm = ScriptedLLMClient(
@@ -584,9 +573,7 @@ class TestPipelinePlanner:
 
 
 class TestPipelineMultiRound:
-    async def test_second_round_uses_previous_summary(
-        self, uow: UnitOfWork, novel_id: UUID
-    ):
+    async def test_second_round_uses_previous_summary(self, uow: UnitOfWork, novel_id: UUID):
         """第 2 轮的 Writer prompt 注入第 1 章的真实摘要。"""
         await _seed_novel(uow, novel_id)
         llm = ScriptedLLMClient(

@@ -92,9 +92,7 @@ class LLMClient:
 
     def get_stats(self):
         """获取所有 Provider 的运行时统计（可变累计器视图）。"""
-        return {
-            name: p.stats for name, p in self.factory.list_providers().items()
-        }
+        return {name: p.stats for name, p in self.factory.list_providers().items()}
 
     # ── Stats 聚合（ADR-0010 §10-C） ──────────────────────
 
@@ -105,6 +103,10 @@ class LLMClient:
     def aggregate_stats(self) -> dict:
         """返回当前会话的汇总统计（total_calls/tokens/cost/延迟/成功率/降级率）。"""
         return aggregate_snapshots(self._stats_history)
+
+    def get_raw_stats(self) -> list[ProviderStats]:
+        """返回原始 ProviderStats 列表（用于持久化到数据库）。"""
+        return list(self._stats_history)
 
     def reset_stats(self) -> None:
         """清空会话 Stats 历史（含各 Provider 的调用快照历史）。"""
@@ -120,14 +122,49 @@ class LLMClient:
         await cleanup_http_clients()
 
 
-def build_llm_client(config: Optional[LLMConfig] = None):
+def build_llm_client(
+    config: Optional[LLMConfig] = None,
+    db_path: Optional[str] = None,
+):
     """按环境构造 LLM 客户端（CLI 与 Agent 流水线的统一入口）。
 
     - 默认：真实 ``LLMClient``（DeepSeek 等 Provider，需相应 API Key 环境变量）
     - ``INKMIND_LLM_FAKE=1``：离线 ``ScriptedLLMClient``（测试/演示，无网络）
+    - 未传入 config 时尝试从 DB app_settings 读取（db_path 参数指定数据库路径）
     """
     if os.environ.get("INKMIND_LLM_FAKE") == "1":
         from inkmind.llm.scripted import ScriptedLLMClient
 
         return ScriptedLLMClient()
+
+    if config is None and db_path is not None:
+        config = _load_config_from_db(db_path)
+
     return LLMClient(config)
+
+
+def _load_config_from_db(db_path: str) -> LLMConfig:
+    """从数据库 app_settings 表读取 LLM 配置，不存在则返回代码默认。
+
+    同步版本 — 适合 CLI 入口等非异步上下文（内部启用新事件循环）。
+    """
+    import asyncio
+
+    return asyncio.run(_load_config_from_db_async(db_path))
+
+
+async def _load_config_from_db_async(db_path: str) -> LLMConfig:
+    """从数据库 app_settings 表读取 LLM 配置的异步版本。
+
+    适合在已有事件循环的上下文中调用（如 FastAPI 端点、Agent 流水线）。
+    """
+    from inkmind.storage.database import DatabaseManager
+    from inkmind.storage.repositories import AppSettingsRepository
+
+    mgr = DatabaseManager(db_path)
+    async with mgr.session() as session:
+        await mgr.create_tables()
+        repo = AppSettingsRepository(session)
+        saved = await repo.get()
+    await mgr.close()
+    return LLMConfig.load_or_default(saved)

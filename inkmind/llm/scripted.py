@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import AsyncGenerator, Dict, List, Optional
 
 from inkmind.llm.providers.base import LLMResponse, ProviderStats, aggregate_snapshots
 
@@ -82,6 +82,46 @@ class ScriptedLLMClient:
             usage=None,
         )
 
+    async def chat_stream(
+        self,
+        agent_role: str,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        **kwargs,
+    ) -> AsyncGenerator[str, None]:
+        """模拟流式响应 — 以 token 分片产出确定性内容。"""
+        self.calls.append(
+            {
+                "agent_role": agent_role,
+                "prompt": prompt,
+                "system_prompt": system_prompt,
+            }
+        )
+        self._call_counts[agent_role] = self._call_counts.get(agent_role, 0) + 1
+        content = self._next_content(agent_role, prompt)
+
+        # 分片产出：每次 5-15 个字符
+        chunk_size = 10
+        for i in range(0, len(content), chunk_size):
+            yield content[i : i + chunk_size]
+
+        self.record_stats(
+            ProviderStats(
+                provider_name="scripted",
+                model_name="scripted-fake",
+                latency_ms=0.0,
+                prompt_tokens=0,
+                completion_tokens=0,
+                total_tokens=0,
+                estimated_cost=0.0,
+                success=True,
+                error_type=None,
+                degraded=False,
+                retry_count=0,
+                timestamp=datetime.now(timezone.utc),
+            )
+        )
+
     def get_stats(self) -> dict:
         """离线客户端无 Provider 统计，返回空 dict（接口对齐）。"""
         return {}
@@ -99,6 +139,16 @@ class ScriptedLLMClient:
     def reset_stats(self) -> None:
         """清空会话 Stats 历史。"""
         self._stats_history.clear()
+
+    def get_raw_stats(self) -> list[ProviderStats]:
+        """返回原始 ProviderStats 列表（接口与 LLMClient 对齐）。"""
+        return list(self._stats_history)
+
+    def cancel_all(self) -> None:
+        """离线客户端无进行中请求，空操作（接口对齐）。"""
+
+    async def shutdown(self) -> None:
+        """离线客户端无 HTTP 连接，空操作（接口对齐）。"""
 
     # ── 内部 ──────────────────────────────────────────────
 
@@ -130,10 +180,7 @@ class ScriptedLLMClient:
         return '{"verdict": "approve", "issues": []}'
 
     def _default_memory_keeper(self, prompt: str) -> str:
-        return (
-            '{"summary": "离线演示摘要：本章已定稿，情节按计划推进", '
-            '"key_events": ["章节完成"]}'
-        )
+        return '{"summary": "离线演示摘要：本章已定稿，情节按计划推进", "key_events": ["章节完成"]}'
 
     def _default_planner(self, prompt: str) -> str:
         # 从 prompt 解析起始章节序号（build_planner_prompt 输出「起始章节序号：N」），

@@ -39,4 +39,4 @@ def db_path_from_config(cfg) -> str:
 
     path = Path(cfg.db_path)
     os.makedirs(str(path.parent), exist_ok=True)
-    return cfg.db_path
+    return str(cfg.db_path)

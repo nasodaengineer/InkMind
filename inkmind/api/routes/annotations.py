@@ -20,7 +20,9 @@ from inkmind.models.annotation import (
 )
 from inkmind.storage.repositories import AnnotationRepository
 
-router = APIRouter(prefix="/api/novels/{novel_id}/chapters/{chapter_id}/annotations", tags=["annotations"])
+router = APIRouter(
+    prefix="/api/novels/{novel_id}/chapters/{chapter_id}/annotations", tags=["annotations"]
+)
 
 
 # ── Request / Response schemas ──

@@ -1,1 +1,1 @@
-"""InkMind API 层。"""
+"""InkMind Web API — FastAPI 应用。"""

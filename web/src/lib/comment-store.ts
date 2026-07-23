@@ -229,7 +229,7 @@ export function reconcileMarks(
 // ── 指纹刷新 ──
 
 export function refreshFingerprint(
-  anchor: AnchorFingerprint,
+  _anchor: AnchorFingerprint,
   currentText: string,
   newStart: number,
   newEnd: number,
