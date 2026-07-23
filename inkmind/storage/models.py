@@ -31,6 +31,8 @@ __all__ = [
     "ChapterModel",
     "ChapterVersionModel",
     "CharacterModel",
+    "CommentModel",
+    "CommentThreadModel",
     "CompressionTaskModel",
     "MemoryArchiveModel",
     "NovelModel",
@@ -413,3 +415,71 @@ class ProcessedDigestModel(Base):
         default=lambda: datetime.now(timezone.utc),
         server_default=func.now(),
     )
+
+
+# ═══════════════════════════════════════════════════════
+#  11. CommentThread — 批注线程
+# ═══════════════════════════════════════════════════════
+
+
+class CommentThreadModel(Base):
+    __tablename__ = "comment_threads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    uuid: Mapped[str] = mapped_column(
+        String(36), unique=True, nullable=False, index=True
+    )
+    novel_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("novels.uuid"), nullable=False, index=True
+    )
+    chapter_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("chapters.uuid"), nullable=False, index=True
+    )
+    intent: Mapped[str] = mapped_column(String(20), nullable=False, default="note")
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="open", index=True
+    )
+    anchor: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+    comments = relationship(
+        "CommentModel", back_populates="thread", lazy="selectin",
+        cascade="all, delete-orphan",
+    )
+
+
+# ═══════════════════════════════════════════════════════
+#  12. Comment — 批注评语
+# ═══════════════════════════════════════════════════════
+
+
+class CommentModel(Base):
+    __tablename__ = "comments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    uuid: Mapped[str] = mapped_column(
+        String(36), unique=True, nullable=False, index=True
+    )
+    thread_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("comment_threads.uuid"), nullable=False, index=True
+    )
+    author: Mapped[str] = mapped_column(String(10), nullable=False, default="user")
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+
+    thread = relationship("CommentThreadModel", back_populates="comments")

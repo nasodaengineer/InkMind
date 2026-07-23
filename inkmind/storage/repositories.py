@@ -12,6 +12,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from inkmind.models.agent import PipelineState
+from inkmind.models.annotation import Comment, CommentThread, ThreadStatus
 from inkmind.models.chapter import Chapter, ChapterVersion
 from inkmind.models.character import Character
 from inkmind.models.novel import Novel
@@ -20,6 +21,8 @@ from inkmind.storage.models import (
     ChapterModel,
     ChapterVersionModel,
     CharacterModel,
+    CommentModel,
+    CommentThreadModel,
     NovelModel,
     PipelineStateModel,
     WorldModel,
@@ -31,9 +34,13 @@ from inkmind.storage.serializers import (
     chapter_version_to_orm,
     character_to_dict,
     character_to_orm,
+    comment_thread_to_dict,
+    comment_thread_to_orm,
+    comment_to_orm,
     dict_to_chapter,
     dict_to_chapter_version,
     dict_to_character,
+    dict_to_comment_thread,
     dict_to_novel,
     dict_to_pipeline_state,
     dict_to_world,
@@ -275,3 +282,82 @@ class PipelineStateRepository:
             return False
         await self._session.delete(model)
         return True
+
+
+class AnnotationRepository:
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def save_thread(self, thread: CommentThread) -> None:
+        data = comment_thread_to_orm(thread)
+        result = await self._session.execute(
+            select(CommentThreadModel).where(CommentThreadModel.uuid == str(thread.id))
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            for k, v in data.items():
+                setattr(existing, k, v)
+        else:
+            model = CommentThreadModel(**data)
+            self._session.add(model)
+            for comment in thread.comments:
+                self._session.add(CommentModel(**comment_to_orm(comment, str(thread.id))))
+
+    async def get_thread(self, thread_id: UUID) -> CommentThread | None:
+        result = await self._session.execute(
+            select(CommentThreadModel).where(CommentThreadModel.uuid == str(thread_id))
+        )
+        model = result.scalar_one_or_none()
+        if model is None:
+            return None
+        return dict_to_comment_thread(comment_thread_to_dict(model))
+
+    async def list_threads(
+        self, chapter_id: UUID, include_resolved: bool = False
+    ) -> list[CommentThread]:
+        stmt = select(CommentThreadModel).where(
+            CommentThreadModel.chapter_id == str(chapter_id)
+        )
+        if not include_resolved:
+            stmt = stmt.where(CommentThreadModel.status != "resolved")
+        stmt = stmt.order_by(CommentThreadModel.created_at)
+        result = await self._session.execute(stmt)
+        models = result.scalars().all()
+        return [dict_to_comment_thread(comment_thread_to_dict(m)) for m in models]
+
+    async def delete_thread(self, thread_id: UUID) -> bool:
+        result = await self._session.execute(
+            select(CommentThreadModel).where(CommentThreadModel.uuid == str(thread_id))
+        )
+        model = result.scalar_one_or_none()
+        if model is None:
+            return False
+        await self._session.delete(model)
+        return True
+
+    async def add_comment(self, thread_id: UUID, comment: Comment) -> None:
+        self._session.add(CommentModel(**comment_to_orm(comment, str(thread_id))))
+        await self._session.execute(
+            update(CommentThreadModel)
+            .where(CommentThreadModel.uuid == str(thread_id))
+            .values(updated_at=comment.created_at)
+        )
+
+    async def update_thread_status(
+        self, thread_id: UUID, status: ThreadStatus, resolved_at=None
+    ) -> None:
+        values: dict = {"status": status.value}
+        if resolved_at is not None:
+            values["resolved_at"] = resolved_at
+        await self._session.execute(
+            update(CommentThreadModel)
+            .where(CommentThreadModel.uuid == str(thread_id))
+            .values(**values)
+        )
+
+    async def update_anchor(self, thread_id: UUID, anchor: dict) -> None:
+        await self._session.execute(
+            update(CommentThreadModel)
+            .where(CommentThreadModel.uuid == str(thread_id))
+            .values(anchor=anchor)
+        )
