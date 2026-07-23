@@ -134,8 +134,9 @@ class DatabaseManager:
                     vol_uuid = str(uuid4())
                     await conn.execute(
                         text(
-                            "INSERT INTO volumes (uuid, novel_id, volume_index, title, planned_size) "
-                            "VALUES (:uuid, :nid, 1, '默认卷', 100)"
+                            "INSERT INTO volumes (uuid, novel_id, volume_index, title, "
+                            "stage_goal, main_line, side_line, volume_cliffhanger, planned_size) "
+                            "VALUES (:uuid, :nid, 1, '默认卷', '', '', '', '', 100)"
                         ),
                         {"uuid": vol_uuid, "nid": nid},
                     )

@@ -17,6 +17,7 @@ from inkmind.models.agent import (
 from inkmind.models.chapter import Chapter, ChapterVersion
 from inkmind.models.character import Character, CharacterTimelineEntry
 from inkmind.models.novel import Novel, NovelMetadata, OutlineSpine, Volume
+from inkmind.models.run import Run, RunKind, RunStatus
 from inkmind.models.world import (
     Faction,
     Location,

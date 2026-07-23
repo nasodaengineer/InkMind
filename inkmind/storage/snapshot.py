@@ -162,10 +162,10 @@ class JSONSnapshot:
                     INSERT OR REPLACE INTO chapters
                     (uuid, novel_id, chapter_index, title, content, status, summary, key_events,
                      source_trace, outline_id, version, is_baseline, created_at, updated_at,
-                     is_deleted, deleted_at)
+                     is_deleted, deleted_at, volume_id, rhythm_marker, pov, involved)
                     VALUES (:uuid, :novel_id, :chapter_index, :title, :content, :status, :summary,
                      :key_events, :source_trace, :outline_id, :version, :is_baseline, :created_at, :updated_at,
-                     :is_deleted, :deleted_at)
+                     :is_deleted, :deleted_at, :volume_id, :rhythm_marker, :pov, :involved)
                     """
                 ),
                 {
@@ -185,6 +185,10 @@ class JSONSnapshot:
                     "updated_at": ch_data.get("updated_at"),
                     "is_deleted": ch_data.get("is_deleted", False),
                     "deleted_at": ch_data.get("deleted_at"),
+                    "volume_id": ch_data.get("volume_id"),
+                    "rhythm_marker": ch_data.get("rhythm_marker"),
+                    "pov": ch_data.get("pov", ""),
+                    "involved": json.dumps(ch_data.get("involved", [])),
                 },
             )
 
