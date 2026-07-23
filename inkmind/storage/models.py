@@ -113,6 +113,7 @@ class ChapterModel(Base):
     outline_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     version: Mapped[int] = mapped_column(Integer, default=1)
     is_baseline: Mapped[bool] = mapped_column(Boolean, default=False)
+    content_digest: Mapped[str] = mapped_column(String(64), default="", index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         default=lambda: datetime.now(timezone.utc),

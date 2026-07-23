@@ -56,6 +56,7 @@ class Chapter(BaseModel):
     # ── 版本管理 ──
     version: int = Field(default=1, ge=1, description="当前版本号")
     is_baseline: bool = Field(default=False, description="是否标记为基线版本")
+    content_digest: str = Field(default="", description="当前内容 SHA256，用于 base_digest 乐观锁")
 
     # ── 时间戳 ──
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
