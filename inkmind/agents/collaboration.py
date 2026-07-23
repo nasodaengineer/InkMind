@@ -342,9 +342,6 @@ class CollaborationPipeline:
             ValueError: 小说不存在
             RuntimeError: 所有 LLM 候选模型均失败
         """
-        assert uow.pipelines is not None
-        assert uow.novels is not None
-        assert uow.chapters is not None
 
         # ── Phase 1: 读取上下文（事务外） ──
         pipeline_state = await uow.pipelines.get_by_novel(novel_id)

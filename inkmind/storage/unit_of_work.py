@@ -60,40 +60,36 @@ class UnitOfWork:
     每个方法对应一个事务边界。所有操作在同一个 AsyncSession 上执行，
     由调用方负责 commit / rollback。
 
-    并发安全：session 模式传入 db_path 或以 db_path 字符串构造时，
-    均启用文件级写锁（ADR-0011 §11-C，commit 在锁保护下序列化）；
-    两种构造的锁文件统一为 {db_path}.lock（§11-B），互斥才成立。
+    并发安全：传入 db_path 时启用文件级写锁（ADR-0011 §11-C，
+    commit 在锁保护下序列化）；锁文件为 {db_path}.lock（§11-B）。
     """
 
     def __init__(
         self,
-        session_or_db_path: AsyncSession | str | None = None,
-        timeout: float = 5.0,
+        session: AsyncSession,
+        *,
         db_path: str | None = None,
+        timeout: float = 5.0,
     ):
-        if isinstance(session_or_db_path, str):
-            # 字符串路径 → 文件锁模式（用于测试或 CLI 简易调用，无 session/repos）
-            db_path = session_or_db_path
-            session_or_db_path = None
+        if session is None:
+            raise TypeError("UnitOfWork requires an AsyncSession")
 
-        self._session = session_or_db_path
+        self._session = session
         self._lock = FileLock.from_path(db_path, timeout=timeout) if db_path else None
-        self.novels = NovelRepository(self._session) if self._session else None
-        self.chapters = ChapterRepository(self._session) if self._session else None
-        self.characters = CharacterRepository(self._session) if self._session else None
-        self.worlds = WorldRepository(self._session) if self._session else None
-        self.pipelines = PipelineStateRepository(self._session) if self._session else None
-        self.runs = RunRepository(self._session) if self._session else None
-        self.volumes = VolumeRepository(self._session) if self._session else None
-        self.spines = OutlineSpineRepository(self._session) if self._session else None
-        self.material_sources = MaterialSourceRepository(self._session) if self._session else None
-        self.material_chunks = MaterialChunkRepository(self._session) if self._session else None
-        self.material_fragments = (
-            MaterialFragmentRepository(self._session) if self._session else None
-        )
-        self.app_settings = AppSettingsRepository(self._session) if self._session else None
-        self.idempotency = IdempotencyGuard(self._session) if self._session else None
-        self.stats = StatsRepository(self._session) if self._session else None
+        self.novels = NovelRepository(session)
+        self.chapters = ChapterRepository(session)
+        self.characters = CharacterRepository(session)
+        self.worlds = WorldRepository(session)
+        self.pipelines = PipelineStateRepository(session)
+        self.runs = RunRepository(session)
+        self.volumes = VolumeRepository(session)
+        self.spines = OutlineSpineRepository(session)
+        self.material_sources = MaterialSourceRepository(session)
+        self.material_chunks = MaterialChunkRepository(session)
+        self.material_fragments = MaterialFragmentRepository(session)
+        self.app_settings = AppSettingsRepository(session)
+        self.idempotency = IdempotencyGuard(session)
+        self.stats = StatsRepository(session)
         self._lock_held = False
 
     @property
@@ -103,8 +99,6 @@ class UnitOfWork:
         仅供只读查询与仓库未覆盖的旧接口（如 JSONSnapshot）使用；
         写操作一律经 T1-T5 事务边界方法 + commit()。
         """
-        if self._session is None:
-            raise RuntimeError("UnitOfWork 未绑定 session（字符串锁模式不支持）")
         return self._session
 
     def __enter__(self) -> UnitOfWork:
@@ -139,8 +133,6 @@ class UnitOfWork:
         Returns:
             (是重复, digest)
         """
-        assert self.idempotency is not None
-        assert self.chapters is not None
 
         # 1. 幂等检查（基于 content digest）
         digest = compute_content_digest(chapter.content)
@@ -178,8 +170,6 @@ class UnitOfWork:
         Raises:
             ValueError: 如果章节和流水线的 novel_id 不一致
         """
-        assert self.chapters is not None
-        assert self.pipelines is not None
 
         # 验证 novel_id 一致性
         for ch in chapters:
@@ -221,7 +211,6 @@ class UnitOfWork:
         Raises:
             ValueError: 非空总纲未确认覆盖时抛出
         """
-        assert self.spines is not None
 
         existing = await self.spines.get_by_novel(novel_id)
 
@@ -269,8 +258,6 @@ class UnitOfWork:
         """
         from inkmind.models.novel import Volume
 
-        assert self.volumes is not None
-
         created: list[Volume] = []
         for i, vd in enumerate(volumes_data):
             vol = Volume(
@@ -311,7 +298,6 @@ class UnitOfWork:
         Returns:
             实际写入的 Chapter 列表
         """
-        assert self.chapters is not None
 
         chapters_created: list[Chapter] = []
 
@@ -387,7 +373,6 @@ class UnitOfWork:
             is_approved: 是否批准
             is_baseline: 是否标记为基线版本
         """
-        assert self.chapters is not None
 
         new_status = ChapterStatus.APPROVED if is_approved else ChapterStatus.REVISING
 
@@ -426,8 +411,6 @@ class UnitOfWork:
             CompressionTaskModel,
             MemoryArchiveModel,
         )
-
-        assert self._session is not None
 
         # 1. 更新/写入 L2Archive
         existing = await self._session.execute(
@@ -476,8 +459,6 @@ class UnitOfWork:
         from sqlalchemy import update as sa_update
 
         from inkmind.storage.models import MemoryArchiveModel
-
-        assert self._session is not None
 
         # 1. 更新 L1 滑窗状态
         existing = await self._session.execute(
@@ -530,9 +511,6 @@ class UnitOfWork:
 
         from inkmind.models.materials import MaterialChunk, MaterialSource
         from inkmind.storage.digest import compute_content_digest
-
-        assert self.material_sources is not None
-        assert self.material_chunks is not None
 
         # 1. 计算 digest
         digest = compute_content_digest(raw_text)
@@ -617,8 +595,6 @@ class UnitOfWork:
             error_message: 错误消息（失败时）
             chunk_retry_count: 更新重试次数（None 则不变）
         """
-        assert self.material_fragments is not None
-        assert self.material_chunks is not None
 
         # 1. 清除旧的非 user_edited 片段
         await self.material_fragments.delete_by_chunk_except_edited(chunk_id)
@@ -647,7 +623,6 @@ class UnitOfWork:
         Args:
             settings_json: 完整 LLMConfig 序列化 dict
         """
-        assert self.app_settings is not None
 
         await self.app_settings.upsert(settings_json)
 
@@ -661,7 +636,6 @@ class UnitOfWork:
         Args:
             stats_list: 来自 LLMClient.get_raw_stats() 的 ProviderStats 列表。
         """
-        assert self._session is not None
 
         for s in stats_list:
             model = ProviderStatsModel(
@@ -704,7 +678,6 @@ class UnitOfWork:
         Raises:
             ValueError: 同章有 running 状态的 run 时 409
         """
-        assert self.runs is not None
 
         # 校验同章无 running run
         if chapter_id is not None:
@@ -745,8 +718,6 @@ class UnitOfWork:
         Returns:
             chapter_id: 写入的 Chapter UUID
         """
-        assert self.runs is not None
-        assert self.chapters is not None
 
         run = await self.runs.get_by_id(run_id)
         if run is None:
@@ -807,7 +778,6 @@ class UnitOfWork:
             new_status: 终态（awaiting_human/completed/failed/cancelled/interrupted）
             llm_stats: 聚合 LLM 统计快照
         """
-        assert self.runs is not None
 
         run = await self.runs.get_by_id(run_id)
         if run is None:
@@ -849,9 +819,6 @@ class UnitOfWork:
         3. L2 压缩：若滑窗外章节数 ≥ 阈值则创建压缩任务
         """
         from inkmind.storage.models import MemoryArchiveModel
-
-        assert self.chapters is not None
-        assert self._session is not None
 
         chapter = await self.chapters.get_by_novel_and_index(novel_id, chapter_index)
         if chapter is None:
@@ -970,8 +937,6 @@ class UnitOfWork:
         """
         from inkmind.storage.models import CompressionTaskModel
 
-        assert self._session is not None
-
         self._session.add(
             CompressionTaskModel(
                 task_id=str(task_id),
@@ -990,14 +955,12 @@ class UnitOfWork:
         锁已被 ``with uow`` 持有（_lock_held）时不重复获取，避免自锁死。
         """
         if self._lock is None or self._lock_held:
-            assert self._session is not None
             await self._session.commit()
             return
         acquired = await self._lock.aacquire()
         if not acquired:
             raise RuntimeError("数据库写锁超时，请稍后重试")
         try:
-            assert self._session is not None
             await self._session.commit()
         finally:
             self._lock.release()
@@ -1011,6 +974,5 @@ class UnitOfWork:
         try:
             yield
         except Exception:
-            assert self._session is not None
             await self._session.rollback()
             raise

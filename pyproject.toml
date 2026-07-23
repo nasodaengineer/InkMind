@@ -49,3 +49,5 @@ ignore = ["E712", "E402"]
 
 [tool.mypy]
 plugins = ["pydantic.mypy"]
+warn_return_any = true
+check_untyped_defs = true

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 
 from sqlalchemy import func, select
 
@@ -34,20 +35,20 @@ class StatusCommand(BaseCommand):
             return
 
         async with get_session(db_path) as session:
-            result = await session.execute(
+            novel_result = await session.execute(
                 select(NovelModel).where(NovelModel.uuid == str(novel_id))
             )
-            novel = result.scalar_one_or_none()
+            novel = novel_result.scalar_one_or_none()
             if novel is None:
                 formatter.error(f"小说 {novel_id} 不存在")
                 return
 
-            result = await session.execute(
+            ps_result = await session.execute(
                 select(PipelineStateModel).where(PipelineStateModel.novel_id == str(novel_id))
             )
-            result.scalar_one_or_none()
+            ps_result.scalar_one_or_none()
 
-            result = await session.execute(
+            count_result = await session.execute(
                 select(
                     ChapterModel.status,
                     func.count(ChapterModel.uuid),
@@ -55,19 +56,19 @@ class StatusCommand(BaseCommand):
                 .where(ChapterModel.novel_id == str(novel_id))
                 .group_by(ChapterModel.status)
             )
-            status_counts = dict(result.all())
+            status_counts: dict[str, int] = {row[0]: row[1] for row in count_result.all()}
 
-            result = await session.execute(
+            ch_result = await session.execute(
                 select(ChapterModel)
                 .where(ChapterModel.novel_id == str(novel_id))
                 .order_by(ChapterModel.chapter_index)
             )
-            chapters = list(result.scalars().all())
+            chapters = list(ch_result.scalars().all())
 
             total = len(chapters)
             finalized = status_counts.get("finalized", 0)
 
-        data = {
+        data: dict[str, Any] = {
             "novel_id": str(novel_id),
             "title": novel.title,
             "description": novel.description,

@@ -127,10 +127,6 @@ async def start_run(
     novel_uuid = UUID(novel_id)
     chapter_uuid = UUID(body.chapter_id) if body.chapter_id else None
 
-    assert uow.spines is not None
-    assert uow.volumes is not None
-    assert uow.runs is not None
-
     try:
         kind = RunKind(body.kind)
     except ValueError:
@@ -289,7 +285,6 @@ async def stream_run(
 
     # 检查 Run 状态（UnitOfWork 仅支持 sync context manager）
     with UnitOfWork(session) as uow:
-        assert uow.runs is not None
         run = await uow.runs.get_by_id(run_uuid)
 
     if run is None:
@@ -443,7 +438,6 @@ async def list_runs(
     uow: UnitOfWork = Depends(_get_uow),
 ):
     """获取小说的所有 Run 记录。"""
-    assert uow.runs is not None
 
     novel_uuid = UUID(novel_id)
     runs = await uow.runs.get_by_novel(novel_uuid)
@@ -463,7 +457,6 @@ async def get_run(
     uow: UnitOfWork = Depends(_get_uow),
 ):
     """获取单条 Run 记录。"""
-    assert uow.runs is not None
 
     run_uuid = UUID(run_id)
     run = await uow.runs.get_by_id(run_uuid)
@@ -488,7 +481,6 @@ async def cancel_run(
 
     设置取消标记并持久化终态。
     """
-    assert uow.runs is not None
 
     run_uuid = UUID(run_id)
     run = await uow.runs.get_by_id(run_uuid)

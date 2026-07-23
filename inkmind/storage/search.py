@@ -403,8 +403,8 @@ class FTSManager:
 
 def page_from_params(params: dict) -> int:
     """从 params offset/limit 计算页码。"""
-    limit = params.get("limit", 20)
-    offset = params.get("offset", 0)
+    limit = int(params.get("limit", 20))
+    offset = int(params.get("offset", 0))
     if limit and limit > 0:
         return (offset // limit) + 1
     return 1

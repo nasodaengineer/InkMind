@@ -81,7 +81,6 @@ async def _set_chapter_status(db_path: str, novel_id, chapter_index: int, status
     mgr = DatabaseManager(db_path)
     async with mgr.session_factory() as s:
         uow = UnitOfWork(s)
-        assert uow.chapters is not None
         ch = await uow.chapters.get_by_novel_and_index(novel_id, chapter_index)
         if ch:
             ch.status = status
@@ -251,7 +250,6 @@ class TestVersionHistory:
                 content="旧版本内容\n第二段",
                 source_trace="ai",
             )
-            assert uow.chapters is not None
             await uow.chapters.save_version(version)
             await s.commit()
         await mgr.close()
@@ -283,7 +281,6 @@ class TestVersionHistory:
                 content="第一段内容\n旧的第二段\n第三段内容",
                 source_trace="ai",
             )
-            assert uow.chapters is not None
             await uow.chapters.save_version(version)
             await s.commit()
         await mgr.close()
@@ -329,8 +326,6 @@ class TestT9Status:
         mgr = DatabaseManager(db_path)
         async with mgr.session_factory() as s:
             uow = UnitOfWork(s)
-            assert uow.chapters is not None
-            assert uow.runs is not None
 
             run = Run(
                 id=uuid4(),

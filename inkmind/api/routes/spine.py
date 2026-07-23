@@ -65,7 +65,6 @@ async def get_spine(
     uow: UnitOfWork = Depends(get_uow),
 ) -> SpineResponse:
     """获取总纲（懒创建：如果不存在则自动创建空总纲）。"""
-    assert uow.spines is not None
 
     spine = await uow.spines.get_by_novel(novel_id)
     if spine is None:
@@ -82,7 +81,6 @@ async def update_spine(
     uow: UnitOfWork = Depends(get_uow),
 ) -> SpineResponse:
     """更新总纲字段。"""
-    assert uow.spines is not None
 
     spine = await uow.spines.get_by_novel(novel_id)
     if spine is None:

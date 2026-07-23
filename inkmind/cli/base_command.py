@@ -35,8 +35,7 @@ class BaseCommand:
         if hasattr(result, "__await__"):
             import asyncio
 
-            return asyncio.run(result)
-        return result
+            asyncio.run(result)
 
     @classmethod
     def _run(cls, args, formatter, cfg, db_path, novel_id):

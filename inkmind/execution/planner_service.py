@@ -278,7 +278,8 @@ class PlannerService:
                     data = val
                     break
 
-        return data
+        result: list[dict[str, Any]] = data
+        return result
 
     # ═══════════════════════════════════════════════════════════
     #  4. plan_chapters — 卷内 5-50 章批量排章
@@ -358,4 +359,5 @@ class PlannerService:
         for i, ch in enumerate(data):
             ch["chapter_index"] = start_index + i
 
-        return data
+        result: list[dict[str, Any]] = data
+        return result

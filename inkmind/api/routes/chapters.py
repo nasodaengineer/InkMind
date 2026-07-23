@@ -208,7 +208,6 @@ async def finalize_chapter(
     仅 AWAITING_HUMAN 状态可定稿，其余返回 409。
     """
     uow = UnitOfWork(session)
-    assert uow.chapters is not None
 
     chapter = await uow.chapters.get_by_novel_and_index(novel_id, chapter_index)
     if chapter is None:
