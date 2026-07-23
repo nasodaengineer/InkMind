@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from inkmind.api.routes import (
+    annotations as annotations_routes,
     health,
     novels,
     chapters,
@@ -70,6 +71,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
     app.include_router(materials.router)
     app.include_router(settings.router)
     app.include_router(stats.router)
+    app.include_router(annotations_routes.router)
 
     # ── 静态文件与 SPA fallback（生产模式）──
     dist = Path(__file__).resolve().parent.parent.parent / "web" / "dist"

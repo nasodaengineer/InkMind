@@ -1194,3 +1194,94 @@ def _material_fragment_from_orm(model) -> MaterialFragment:
         user_edited=model.user_edited,
         created_at=model.created_at,
     )
+
+
+class AnnotationRepository:
+    def __init__(self, session: AsyncSession):
+        self._session = session
+
+    async def save_thread(self, thread) -> None:
+        from inkmind.storage.models import CommentModel, CommentThreadModel
+        from inkmind.storage.serializers import comment_thread_to_orm, comment_to_orm
+
+        data = comment_thread_to_orm(thread)
+        result = await self._session.execute(
+            select(CommentThreadModel).where(CommentThreadModel.uuid == str(thread.id))
+        )
+        existing = result.scalar_one_or_none()
+        if existing:
+            for k, v in data.items():
+                setattr(existing, k, v)
+        else:
+            model = CommentThreadModel(**data)
+            self._session.add(model)
+            for comment in thread.comments:
+                self._session.add(CommentModel(**comment_to_orm(comment, str(thread.id))))
+
+    async def get_thread(self, thread_id: UUID):
+        from inkmind.storage.models import CommentThreadModel
+        from inkmind.storage.serializers import comment_thread_to_dict, dict_to_comment_thread
+
+        result = await self._session.execute(
+            select(CommentThreadModel).where(CommentThreadModel.uuid == str(thread_id))
+        )
+        model = result.scalar_one_or_none()
+        if model is None:
+            return None
+        return dict_to_comment_thread(comment_thread_to_dict(model))
+
+    async def list_threads(self, chapter_id: UUID, include_resolved: bool = False) -> list:
+        from inkmind.storage.models import CommentThreadModel
+        from inkmind.storage.serializers import comment_thread_to_dict, dict_to_comment_thread
+
+        stmt = select(CommentThreadModel).where(CommentThreadModel.chapter_id == str(chapter_id))
+        if not include_resolved:
+            stmt = stmt.where(CommentThreadModel.status != "resolved")
+        stmt = stmt.order_by(CommentThreadModel.created_at)
+        result = await self._session.execute(stmt)
+        models = result.scalars().all()
+        return [dict_to_comment_thread(comment_thread_to_dict(m)) for m in models]
+
+    async def delete_thread(self, thread_id: UUID) -> bool:
+        from inkmind.storage.models import CommentThreadModel
+
+        result = await self._session.execute(
+            select(CommentThreadModel).where(CommentThreadModel.uuid == str(thread_id))
+        )
+        model = result.scalar_one_or_none()
+        if model is None:
+            return False
+        await self._session.delete(model)
+        return True
+
+    async def add_comment(self, thread_id: UUID, comment) -> None:
+        from inkmind.storage.models import CommentModel, CommentThreadModel
+        from inkmind.storage.serializers import comment_to_orm
+
+        self._session.add(CommentModel(**comment_to_orm(comment, str(thread_id))))
+        await self._session.execute(
+            update(CommentThreadModel)
+            .where(CommentThreadModel.uuid == str(thread_id))
+            .values(updated_at=comment.created_at)
+        )
+
+    async def update_thread_status(self, thread_id: UUID, status, resolved_at=None) -> None:
+        from inkmind.storage.models import CommentThreadModel
+
+        values: dict = {"status": status.value}
+        if resolved_at is not None:
+            values["resolved_at"] = resolved_at
+        await self._session.execute(
+            update(CommentThreadModel)
+            .where(CommentThreadModel.uuid == str(thread_id))
+            .values(**values)
+        )
+
+    async def update_anchor(self, thread_id: UUID, anchor: dict) -> None:
+        from inkmind.storage.models import CommentThreadModel
+
+        await self._session.execute(
+            update(CommentThreadModel)
+            .where(CommentThreadModel.uuid == str(thread_id))
+            .values(anchor=anchor)
+        )

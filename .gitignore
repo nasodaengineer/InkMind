@@ -9,6 +9,11 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 
+# Node.js / 前端
+node_modules/
+dist/
+*.tsbuildinfo
+
 # 本地数据库 / 运行产物
 *.db
 *.sqlite3
